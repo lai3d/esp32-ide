@@ -55,9 +55,28 @@ struct PinsView: View {
                     .buttonStyle(.borderless)
                     .help("Rescan the project")
                 Spacer()
-                Text(pins.isEmpty ? "" : "\(pins.count) GPIOs · classic ESP32 rules")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Menu {
+                    Button {
+                        workspace.setPinChip(nil)
+                    } label: {
+                        if workspace.pinChipIsAutomatic { Label("Automatic (from the board)", systemImage: "checkmark") }
+                        else { Text("Automatic (from the board)") }
+                    }
+                    Divider()
+                    ForEach(PinScanner.Chip.all, id: \.name) { chip in
+                        Button {
+                            workspace.setPinChip(chip)
+                        } label: {
+                            if !workspace.pinChipIsAutomatic && workspace.pinChip == chip { Label(chip.name, systemImage: "checkmark") }
+                            else { Text(chip.name) }
+                        }
+                    }
+                } label: {
+                    Text("\(pins.count) GPIOs · \(workspace.pinChip.name) rules").font(.caption)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Which chip's pin rules to apply")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
@@ -65,6 +84,7 @@ struct PinsView: View {
         .onAppear(perform: refresh)
         .onChange(of: workspace.hasUnsavedChanges) { refresh() }
         .onChange(of: workspace.fileTree.count) { refresh() }
+        .onChange(of: workspace.pinChip) { refresh() }
     }
 
     private func refresh() { pins = workspace.pinMap() }

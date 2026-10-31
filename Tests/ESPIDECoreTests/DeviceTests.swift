@@ -154,6 +154,8 @@ struct RealBoardTests {
             return (sum, read, listed, hashes)
         }
         #expect(sum == "42\r\n")
+        let machine = try await device.exec("import sys\nprint(sys.implementation._machine)")
+        #expect(PinScanner.Chip(machine: machine) == .esp32, "\(machine)")
         #expect(read == contents)
         #expect(listed.contains { $0.path == "/espide_test" })
         #expect(hashes["/espide_test/t.py"] == contents.sha256Hex)

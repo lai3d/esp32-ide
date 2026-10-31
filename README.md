@@ -21,7 +21,8 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
   index's SHA-256) and copies them to `/lib`, so the board doesn't need Wi-Fi.
 - **GPIO usage** (sidebar, last icon): every pin the project uses — `Pin(…)`, `ADC`/`PWM`, driver keywords like `clk=16`, `*_PIN = 25`
   constants — with classic-ESP32 warnings: flash pins 6–11, input-only 34–39 driven as outputs, strapping pins (12!), ADC2 with Wi-Fi,
-  UART0, one pin used as two different things. Click a use to jump to it.
+  UART0, one pin used as two different things. Rules for ESP32, ESP32-S3 and ESP32-C3, picked from the connected board
+  (`sys.implementation._machine`) or chosen in the sidebar. Click a use to jump to it.
 - **Upload** (⌘U) the current file to the same path on the board; **Sync** (⇧⌘S) uploads every changed `.py`/`.json` file of the project.
   Unchanged files are skipped by comparing SHA-256 on the Mac and on the board. `docs/`, `tests/`, hidden folders and `*.example.py` are not uploaded.
 - **MicroPython completion**: *Python → Install MicroPython Stubs* puts `micropython-esp32-stubs` into
@@ -35,6 +36,9 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
 - **ESP-IDF projects** (folders whose `CMakeLists.txt` includes `project.cmake`): the toolbar switches to
   Target / **Build** (⌘B) / **Flash** (⌥⌘R, then opens the serial monitor) / Monitor / Stop, plus *ESP-IDF → Size, Full Clean*.
   GCC errors and warnings go to the Problems panel and are underlined in the editor; C/C++ files get syntax coloring.
+  After a build, **clangd** gives C/C++ completion, hover, go to definition, references and rename. It reads a cleaned copy of
+  `compile_commands.json` in ESPIDE's cache (response files inlined, GCC-only flags such as `-mlongcalls` removed), so the project
+  is not modified and Apple's clangd works with the Xtensa/RISC-V toolchains. *Menuconfig* opens in Terminal.
   `idf.py` comes from a setup script: an `idf-env.sh` in the project or a parent folder, `$IDF_PATH/export.sh`, `~/esp/esp-idf`,
   or one chosen with *ESP-IDF → Choose ESP-IDF…*. Per-project options (`-B build-x -DSDKCONFIG_DEFAULTS="a;b"`) via *Build Options…*.
 - From PyIDE: tabs, Python highlighting and editing, pyright completion / hover / go to definition / references / rename, Outline, ruff formatting.
@@ -52,7 +56,7 @@ scripts/bundle.sh                                       # build/ESPIDE.app (ad-h
 Layout:
 
 - `Sources/ESPIDECore` — UI-independent: `SerialPort` (termios), `MicroPythonDevice` (raw REPL), `DeviceFiles` (list/read/write/hash/delete),
-  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`, `IDFProject`, `CHighlighter`,
+  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`, `IDFProject`, `CHighlighter`, `Clangd`,
   plus PyIDE's LSP client and text utilities.
 - `Sources/ESPIDE` — the app: `Board` (connection, REPL, run, files), `Workspace`, editor and views.
 
@@ -61,5 +65,5 @@ ESP-IDF features need an ESP-IDF install.
 
 ## Roadmap
 
-- Pin rules for S3/C3 (the map assumes a classic ESP32)
-- clangd for C/C++ completion in ESP-IDF projects; menuconfig
+- Pin rules for more chips (C6, P4)
+- Debugging ESP-IDF apps with OpenOCD + GDB

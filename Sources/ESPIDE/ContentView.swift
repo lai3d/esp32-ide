@@ -111,7 +111,7 @@ struct OutlineView: View {
 
     var body: some View {
         if workspace.outline.isEmpty {
-            Text(workspace.isPythonFile ? "No symbols" : "Open a Python file")
+            Text(workspace.hasLanguageFeatures ? "No symbols" : "Open a Python or C file")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -203,6 +203,7 @@ struct EditorArea: View {
                         text: workspace.text,
                         highlightCode: workspace.isPythonFile,
                         highlightC: workspace.currentFile.map(CHighlighter.isCSource) ?? false,
+                        languageFeatures: workspace.hasLanguageFeatures,
                         isEditable: !workspace.isReadOnly,
                         diagnostics: workspace.currentDiagnostics,
                         reveal: workspace.revealTarget,

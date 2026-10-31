@@ -53,6 +53,22 @@ public enum IDFProject {
         return ["-c", script, "bash", setupScript.path, project.path] + idfArguments
     }
 
+    /// A `.command` script for Terminal (for interactive commands such as menuconfig and monitor).
+    public static func terminalScript(setupScript: URL, project: URL, idfArguments: [String]) -> String {
+        """
+        #!/bin/bash
+        source \(shellQuote(setupScript.path)) >/dev/null || exit 1
+        cd \(shellQuote(project.path)) || exit 1
+        idf.py \(idfArguments.map(shellQuote).joined(separator: " "))
+        echo
+        read -n 1 -s -r -p "Done — press any key to close"
+        """
+    }
+
+    public static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     /// Splits a command line like a shell: spaces separate, quotes group, backslash escapes.
     /// `-DSDKCONFIG_DEFAULTS="a;b"` → `-DSDKCONFIG_DEFAULTS=a;b`.
     public static func shellWords(_ line: String) -> [String] {

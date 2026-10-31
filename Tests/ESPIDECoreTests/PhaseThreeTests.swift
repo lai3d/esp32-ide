@@ -95,3 +95,31 @@ import Testing
         await #expect(throws: Mip.Error.self) { _ = try await file.download { _ in (Data("evil".utf8), 200) } }
     }
 }
+
+@Suite struct ChipPinRuleTests {
+    let url = URL(fileURLWithPath: "/p/main.py")
+
+    @Test func detectsChipFromMachineString() {
+        #expect(PinScanner.Chip(machine: "Generic ESP32 module with ESP32") == .esp32)
+        #expect(PinScanner.Chip(machine: "Generic ESP32S3 module with ESP32S3") == .esp32s3)
+        #expect(PinScanner.Chip(machine: "ESP32-C3 DevKit") == .esp32c3)
+        #expect(PinScanner.Chip(machine: "RP2040") == nil)
+    }
+
+    @Test func s3Rules() {
+        let uses = PinScanner.scan([(url, "a = Pin(35, Pin.OUT)\nb = Pin(48, Pin.OUT)\nc = Pin(19)\nd = Pin(23)")])
+        let pins = Dictionary(uniqueKeysWithValues: PinScanner.pins(uses, usesWiFi: false, chip: .esp32s3).map { ($0.number, $0) })
+        #expect(pins[35]?.severity == nil)       // fine on S3 (input-only on ESP32)
+        #expect(pins[48]?.severity == nil)       // exists on S3
+        #expect(pins[19]?.severity == .warning)  // USB
+        #expect(pins[23]?.severity == .error)    // doesn't exist
+    }
+
+    @Test func c3Rules() {
+        let uses = PinScanner.scan([(url, "a = Pin(14)\nb = Pin(9, Pin.IN)\nc = Pin(25)")])
+        let pins = Dictionary(uniqueKeysWithValues: PinScanner.pins(uses, usesWiFi: false, chip: .esp32c3).map { ($0.number, $0) })
+        #expect(pins[14]?.severity == .error)
+        #expect(pins[9]?.severity == .warning)
+        #expect(pins[25]?.severity == .error)
+    }
+}

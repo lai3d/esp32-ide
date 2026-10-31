@@ -37,6 +37,8 @@ final class Board {
     private(set) var isToolRunning = false
     @ObservationIgnored private var toolProcess: Process?
     private(set) var filesLoaded = false
+    /// MicroPython's description of the board, e.g. "Generic ESP32 module with ESP32".
+    private(set) var machine: String?
     /// Set when something fails, shown in the status bar.
     var onStatus: ((String) -> Void)?
     /// Switches the bottom panel (Output / REPL) when a command starts.
@@ -230,9 +232,11 @@ final class Board {
     func refreshFiles() {
         perform("Reading files") { session in
             let files = try await session.listFiles()
+            let machine = try? await session.exec("import sys\nprint(sys.implementation._machine)")
             await MainActor.run {
                 self.files = files
                 self.filesLoaded = true
+                if let machine { self.machine = machine.trimmingCharacters(in: .whitespacesAndNewlines) }
             }
         }
     }

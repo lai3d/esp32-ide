@@ -57,17 +57,17 @@ struct ESPIDEApp: App {
                     Task { await workspace.jumpToDefinition(at: workspace.caretOffset) }
                 }
                 .keyboardShortcut("j", modifiers: [.control, .command])
-                .disabled(!workspace.isPythonFile)
+                .disabled(!workspace.hasLanguageFeatures)
                 Button("Find References") {
                     Task { await workspace.findReferences(at: workspace.caretOffset) }
                 }
                 .keyboardShortcut("r", modifiers: [.option, .command])
-                .disabled(!workspace.isPythonFile)
+                .disabled(!workspace.hasLanguageFeatures)
                 Button("Rename Symbol…") {
                     Task { await workspace.renameSymbol(at: workspace.caretOffset) }
                 }
                 .keyboardShortcut("e", modifiers: [.control, .command])
-                .disabled(!workspace.isPythonFile || workspace.isReadOnly)
+                .disabled(!workspace.hasLanguageFeatures || workspace.isReadOnly)
                 Divider()
                 Button("Go Back") { workspace.goBack() }
                     .keyboardShortcut(.leftArrow, modifiers: [.control, .command])
@@ -127,6 +127,8 @@ struct ESPIDEApp: App {
                     .disabled(!workspace.isIDFProject || workspace.board.isToolRunning)
                 Button("Size") { workspace.runIDF(.size) }
                     .disabled(!workspace.isIDFProject || workspace.board.isToolRunning)
+                Button("Menuconfig (Terminal)") { workspace.runIDFInTerminal(["menuconfig"]) }
+                    .disabled(!workspace.isIDFProject)
                 Button("Full Clean") { workspace.runIDF(.clean) }
                     .disabled(!workspace.isIDFProject || workspace.board.isToolRunning)
                 Button("Stop") { workspace.board.stopTool() }

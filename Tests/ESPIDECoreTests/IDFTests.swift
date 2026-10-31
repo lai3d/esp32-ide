@@ -39,6 +39,14 @@ import Testing
         #expect(!IDFProject.isProject(root))
     }
 
+    @Test func quotesTerminalScript() {
+        #expect(IDFProject.shellQuote("it's") == #"'it'\''s'"#)
+        let script = IDFProject.terminalScript(setupScript: URL(fileURLWithPath: "/a/idf-env.sh"),
+                                               project: URL(fileURLWithPath: "/p q"), idfArguments: ["-DX=a;b", "menuconfig"])
+        #expect(script.contains("cd '/p q'"))
+        #expect(script.contains("idf.py '-DX=a;b' 'menuconfig'"))
+    }
+
     @Test func commandPassesPathsAsArguments() {
         let args = IDFProject.command(setupScript: URL(fileURLWithPath: "/a b/idf-env.sh"),
                                       project: URL(fileURLWithPath: "/p q"), idfArguments: ["-B", "b", "build"])
@@ -80,5 +88,91 @@ struct IDFBuildTests {
         #expect(tokens.contains { $0 == ("0x1F", .number) })
         #expect(tokens.contains { $0 == ("gpio_set_level", .function) })
         #expect(tokens.contains { $0 == ("/* c */", .comment) })
+    }
+}
+
+@Suite struct ClangdTests {
+    @Test func sanitizesGCCOnlyFlags() throws {
+        let input = Data(#"[{"directory":"/b","command":"/t/xtensa-esp32-elf-gcc -DX=\"1\" -mlongcalls -specs=/b/p.specs -fdiagnostics-color=always -Wall -c /p/main.c","file":"/p/main.c"}]"#.utf8)
+        let output = try JSONDecoder().decode(JSONValue.self, from: Clangd.sanitize(input))
+        let args = output[0]?["arguments"]?.arrayValue?.compactMap(\.stringValue)
+        #expect(args == ["/t/xtensa-esp32-elf-gcc", "-DX=1", "-specs=/b/p.specs", "-Wall", "-c", "/p/main.c"])
+        #expect(output[0]?["command"] == nil)
+        #expect(output[0]?["file"]?.stringValue == "/p/main.c")
+    }
+
+    @Test func expandsResponseFiles() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("toolchain"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "-mlongcalls -Wno-frame-address".write(to: dir.appendingPathComponent("toolchain/cflags"), atomically: true, encoding: .utf8)
+        var cache: [String: [String]] = [:]
+        let args = Clangd.expandResponseFiles(["gcc", "@toolchain/cflags", "-c", "x.c"], directory: dir, cache: &cache)
+        #expect(Clangd.sanitize(arguments: args) == ["gcc", "-Wno-frame-address", "-c", "x.c"])
+    }
+
+    @Test func findsBuildDirectory() {
+        let project = URL(fileURLWithPath: "/p")
+        #expect(Clangd.buildDirectory(project: project, idfOptions: []).path == "/p/build")
+        #expect(Clangd.buildDirectory(project: project, idfOptions: ["-B", "build-s3", "-DX=1"]).path == "/p/build-s3")
+        #expect(Clangd.buildDirectory(project: project, idfOptions: ["--build-dir=/tmp/b"]).path == "/tmp/b")
+    }
+}
+
+/// Runs `clangd --check` on hello_world with the cleaned database (needs a built ESPIDE_IDF_PROJECT).
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["ESPIDE_IDF_PROJECT"] != nil && Clangd.locate() != nil))
+struct ClangdCheckTests {
+    @Test func cleanDatabaseHasNoErrors() throws {
+        let project = URL(fileURLWithPath: ProcessInfo.processInfo.environment["ESPIDE_IDF_PROJECT"]!)
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let folder = try #require(try Clangd.prepareCompileCommands(buildDirectory: project.appendingPathComponent("build"), cache: cache))
+        let process = Process()
+        process.executableURL = Clangd.locate()
+        process.arguments = ["--check=" + project.appendingPathComponent("main/hello_world_main.c").path]
+            + Clangd.arguments(compileCommandsDirectory: folder).filter { !$0.hasPrefix("--log") }
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        let errors = output.split(separator: "\n").filter { $0.hasPrefix("E[") }
+        #expect(errors.isEmpty, "\(errors.joined(separator: "\n"))")
+        #expect(process.terminationStatus == 0)
+    }
+}
+
+/// clangd as the IDE runs it: completes ESP-IDF APIs in a built project.
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["ESPIDE_IDF_PROJECT"] != nil && Clangd.locate() != nil))
+struct ClangdCompletionTests {
+    @Test(.timeLimit(.minutes(1))) func completesESPIDFFunctions() async throws {
+        let project = URL(fileURLWithPath: ProcessInfo.processInfo.environment["ESPIDE_IDF_PROJECT"]!)
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let folder = try #require(try Clangd.prepareCompileCommands(buildDirectory: project.appendingPathComponent("build"), cache: cache))
+        let client = LSPClient()
+        try client.start(executable: Clangd.locate()!, arguments: Clangd.arguments(compileCommandsDirectory: folder),
+                         environment: ToolLocator.environment(), currentDirectory: project)
+        defer { Task { await client.shutdown() } }
+        _ = try await client.request("initialize", params: [
+            "processId": .int(Int(getpid())),
+            "rootUri": .string(project.absoluteString),
+            "capabilities": ["textDocument": ["completion": ["completionItem": ["snippetSupport": false]]]],
+        ])
+        try client.notify("initialized", params: [:])
+        let file = project.appendingPathComponent("main/hello_world_main.c")
+        let source = try String(contentsOf: file, encoding: .utf8) + "\nvoid espide_probe(void) { esp_restar }\n"
+        try client.notify("textDocument/didOpen", params: ["textDocument": [
+            "uri": .string(file.absoluteString), "languageId": "c", "version": 1, "text": .string(source)]])
+        let lines = source.components(separatedBy: "\n")
+        let line = lines.lastIndex { $0.contains("esp_restar") }!
+        let character = (lines[line] as NSString).range(of: "esp_restar").upperBound
+        let result = try await client.request("textDocument/completion", params: [
+            "textDocument": ["uri": .string(file.absoluteString)],
+            "position": ["line": .int(line), "character": .int(character)],
+        ])
+        let labels = CompletionItem.parseList(result).map(\.label)
+        #expect(labels.contains { $0.contains("esp_restart") }, "\(labels.prefix(10))")
     }
 }

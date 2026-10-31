@@ -85,6 +85,9 @@ final class Workspace {
     @ObservationIgnored private var lsp: LSPClient?
     @ObservationIgnored private var lspName = "Language server"
     @ObservationIgnored private var lspReady = false
+    /// clangd for C/C++ in ESP-IDF projects (started once a build has produced compile_commands.json).
+    @ObservationIgnored private var clangd: LSPClient?
+    private(set) var clangdReady = false
     @ObservationIgnored private var handledLaunchArguments = false
 
     init() {
@@ -171,6 +174,7 @@ final class Workspace {
     func openFolder(_ url: URL) async {
         guard confirmDiscardOrSave(documents.filter(\.isDirty)) else { return }
         await stopLanguageServer()
+        await stopClangd()
         rootURL = url
         fileTree = FileNode.loadTree(at: url)
         fileWatcher = FileWatcher(url: url, ignoredComponents: FileNode.ignoredNames.union([".git"])) { [weak self] in
@@ -189,6 +193,7 @@ final class Workspace {
             openFile(first)
         }
         await startLanguageServer(root: url)
+        if isIDFProject { await startClangd() }
     }
 
     func reloadTree() {
@@ -281,8 +286,8 @@ final class Workspace {
         documents[index].text = newText
         documents[index].isDirty = true
         documents[index].version += 1
-        guard lspReady, Self.isPython(documents[index].url) else { return }
-        try? lsp?.notify("textDocument/didChange", params: [
+        guard let server = server(for: documents[index].url) else { return }
+        try? server.notify("textDocument/didChange", params: [
             "textDocument": ["uri": .string(documents[index].url.absoluteString), "version": .int(documents[index].version)],
             "contentChanges": [["text": .string(newText)]],
         ])
@@ -362,8 +367,8 @@ final class Workspace {
                 // A board file opened from the sidebar: saving writes it back to the board.
                 board.upload(contents: [(remote, Data(document.text.utf8))], force: true)
             }
-            if lspReady, Self.isPython(document.url) {
-                try? lsp?.notify("textDocument/didSave", params: ["textDocument": ["uri": .string(document.url.absoluteString)]])
+            if let server = server(for: document.url) {
+                try? server.notify("textDocument/didSave", params: ["textDocument": ["uri": .string(document.url.absoluteString)]])
             }
             return true
         } catch {
@@ -441,7 +446,7 @@ final class Workspace {
         outlineTask = Task { [weak self] in
             if delay > .zero { try? await Task.sleep(for: delay) }
             guard !Task.isCancelled, let self else { return }
-            guard self.lspReady, self.isPythonFile, let url = self.currentFile, let lsp = self.lsp else {
+            guard let url = self.currentFile, let lsp = self.server(for: url) else {
                 self.outline = []
                 return
             }
@@ -580,7 +585,7 @@ final class Workspace {
     }
 
     private func positionRequest(at offset: Int) -> (LSPClient, JSONValue)? {
-        guard lspReady, isPythonFile, let url = currentFile, let lsp else { return nil }
+        guard let url = currentFile, let lsp = server(for: url) else { return nil }
         let position = LineIndex(text).position(of: offset)
         return (lsp, ["textDocument": ["uri": .string(url.absoluteString)], "position": position.json])
     }
@@ -595,6 +600,67 @@ final class Workspace {
     }
 
     // MARK: - Language server
+
+    /// The language server for a file: pyright for Python, clangd for C/C++.
+    private func server(for url: URL) -> LSPClient? {
+        if Self.isPython(url) { return lspReady ? lsp : nil }
+        if CHighlighter.isCSource(url) { return clangdReady ? clangd : nil }
+        return nil
+    }
+
+    /// Completion, hover, go to definition… are available for the current file.
+    var hasLanguageFeatures: Bool { currentFile.map { server(for: $0) != nil } ?? false }
+
+    /// (Re)starts clangd on a cleaned copy of the build's compile_commands.json.
+    func startClangd() async {
+        guard isIDFProject, let rootURL else { return }
+        await stopClangd()
+        guard let executable = Clangd.locate() else {
+            flashStatus("clangd not found — install Xcode command line tools for C completion")
+            return
+        }
+        let build = Clangd.buildDirectory(project: rootURL, idfOptions: IDFProject.shellWords(idfOptions))
+        let cache = Self.boardCacheURL.deletingLastPathComponent().appendingPathComponent("clangd")
+        guard let folder = try? Clangd.prepareCompileCommands(buildDirectory: build, cache: cache) else {
+            flashStatus("Build once (⌘B) for C completion — clangd needs \(build.lastPathComponent)/compile_commands.json")
+            return
+        }
+        let client = LSPClient()
+        client.onNotification = { method, params in
+            Task { @MainActor in self.handleNotification(client, method: method, params: params) }
+        }
+        client.onExit = { _ in
+            Task { @MainActor in
+                guard self.clangd === client else { return }
+                self.clangd = nil
+                self.clangdReady = false
+            }
+        }
+        do {
+            try client.start(executable: executable, arguments: Clangd.arguments(compileCommandsDirectory: folder),
+                             environment: ToolLocator.environment(), currentDirectory: rootURL)
+            clangd = client
+            _ = try await client.request("initialize", params: Self.initializeParams(root: rootURL))
+            guard clangd === client else { return }
+            try client.notify("initialized", params: [:])
+            clangdReady = true
+            documents.filter { CHighlighter.isCSource($0.url) }.forEach(sendDidOpen)
+            scheduleOutlineRefresh(after: .zero)
+            flashStatus("clangd: ready")
+        } catch {
+            if clangd === client { clangd = nil }
+            flashStatus("clangd failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func stopClangd() async {
+        guard let client = clangd else { return }
+        clangd = nil
+        clangdReady = false
+        client.onNotification = nil
+        client.onExit = nil
+        await client.shutdown()
+    }
 
     func restartLanguageServer() async {
         guard let rootURL else { return }
@@ -657,7 +723,7 @@ final class Workspace {
     }
 
     private func handleNotification(_ client: LSPClient, method: String, params: JSONValue) {
-        guard lsp === client else { return }
+        guard lsp === client || clangd === client else { return }
         switch method {
         case "textDocument/publishDiagnostics":
             guard let published = Diagnostic.parsePublish(params), let url = URL(string: published.uri) else { return }
@@ -677,11 +743,11 @@ final class Workspace {
     }
 
     private func sendDidOpen(_ document: OpenDocument) {
-        guard lspReady, Self.isPython(document.url) else { return }
-        try? lsp?.notify("textDocument/didOpen", params: [
+        guard let server = server(for: document.url) else { return }
+        try? server.notify("textDocument/didOpen", params: [
             "textDocument": [
                 "uri": .string(document.url.absoluteString),
-                "languageId": "python",
+                "languageId": .string(Self.isPython(document.url) ? "python" : Clangd.languageID(for: document.url)),
                 "version": .int(document.version),
                 "text": .string(document.text),
             ],
@@ -689,8 +755,8 @@ final class Workspace {
     }
 
     private func sendDidClose(_ document: OpenDocument) {
-        guard lspReady, Self.isPython(document.url) else { return }
-        try? lsp?.notify("textDocument/didClose", params: ["textDocument": ["uri": .string(document.url.absoluteString)]])
+        guard let server = server(for: document.url) else { return }
+        try? server.notify("textDocument/didClose", params: ["textDocument": ["uri": .string(document.url.absoluteString)]])
     }
 
     private static func initializeParams(root: URL) -> JSONValue {
@@ -810,8 +876,28 @@ final class Workspace {
             if let open = documents.first(where: { $0.id == Self.key(for: url) }) { return (url, open.text) }
             return (try? String(contentsOf: url, encoding: .utf8)).map { (url, $0) }
         }
-        return PinScanner.pins(PinScanner.scan(sources), usesWiFi: PinScanner.usesWiFi(sources))
+        return PinScanner.pins(PinScanner.scan(sources), usesWiFi: PinScanner.usesWiFi(sources), chip: pinChip)
     }
+
+    /// The chip whose pin rules apply: chosen in the GPIO sidebar, else the connected board's, else ESP32.
+    var pinChip: PinScanner.Chip {
+        _ = pinChipVersion
+        if let name = UserDefaults.standard.string(forKey: defaultsKey("pinChip")),
+           let chip = PinScanner.Chip.all.first(where: { $0.name == name }) { return chip }
+        return board.machine.flatMap(PinScanner.Chip.init(machine:)) ?? .esp32
+    }
+
+    /// nil returns to automatic (from the connected board).
+    func setPinChip(_ chip: PinScanner.Chip?) {
+        UserDefaults.standard.set(chip?.name, forKey: defaultsKey("pinChip"))
+        pinChipVersion += 1
+    }
+
+    var pinChipIsAutomatic: Bool {
+        _ = pinChipVersion
+        return UserDefaults.standard.string(forKey: defaultsKey("pinChip")) == nil
+    }
+    private var pinChipVersion = 0
 
     func reveal(_ use: PinScanner.Use) {
         navigate(to: use.file, position: TextPosition(line: use.line, character: 0))
@@ -1035,6 +1121,7 @@ final class Workspace {
             switch action {
             case .build, .flash:
                 buildDiagnostics = IDFProject.diagnostics(inBuildOutput: board.toolOutput, project: rootURL)
+                if status == 0 { await startClangd() }  // compile_commands.json may have changed
                 let errors = buildDiagnostics.values.joined().filter { $0.severity == .error }.count
                 if errors > 0 { bottomTab = .problems }
             case .clean:
@@ -1052,6 +1139,24 @@ final class Workspace {
             } else {
                 flashStatus("\(display) failed (status \(status))")
             }
+        }
+    }
+
+    /// Runs an interactive idf.py command (menuconfig) in Terminal.
+    func runIDFInTerminal(_ arguments: [String]) {
+        guard let rootURL, let setup = idfSetupScript else {
+            flashStatus("ESP-IDF not found — ESP-IDF → Choose ESP-IDF…")
+            return
+        }
+        let script = IDFProject.terminalScript(setupScript: setup, project: rootURL,
+                                               idfArguments: IDFProject.shellWords(idfOptions) + arguments)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("espide-\(arguments.last ?? "idf").command")
+        do {
+            try script.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            NSWorkspace.shared.open(url)
+        } catch {
+            flashStatus(error.localizedDescription)
         }
     }
 

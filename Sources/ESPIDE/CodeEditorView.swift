@@ -26,8 +26,10 @@ struct CodeEditorView: NSViewRepresentable {
     var openDocumentIDs: Set<String>
     var text: String
     var highlightCode: Bool
-    /// C/C++ coloring only (no language server features).
+    /// C/C++ coloring.
     var highlightC = false
+    /// Completion, hover, signature help, go to definition and the symbol context menu.
+    var languageFeatures = false
     var isEditable: Bool
     var diagnostics: [Diagnostic]
     var breakpointLines: Set<Int> = []
@@ -266,7 +268,7 @@ struct CodeEditorView: NSViewRepresentable {
 
             let typed = lastReplacement
             lastReplacement = nil
-            guard parent.highlightCode, !isApplyingCompletion else { return }
+            guard parent.languageFeatures, !isApplyingCompletion else { return }
 
             // Signature help: open on "(" / ",", keep it current while visible.
             if typed == "(" || typed == "," {
@@ -340,7 +342,7 @@ struct CodeEditorView: NSViewRepresentable {
                 return true
             case #selector(NSResponder.cancelOperation(_:)), #selector(NSTextView.complete(_:)):
                 // Esc / ⌥Esc: show completions on demand.
-                if parent.highlightCode && textView.isEditable { scheduleCompletion(after: .zero) }
+                if parent.languageFeatures && textView.isEditable { scheduleCompletion(after: .zero) }
                 return true
             case #selector(NSResponder.insertNewline(_:)):
                 autoIndentNewline(in: textView)
@@ -529,7 +531,7 @@ struct CodeEditorView: NSViewRepresentable {
         // MARK: Hover
 
         func mouseMoved(to index: Int?) {
-            guard parent.highlightCode, let textView, !completionPopup.isVisible else { return }
+            guard parent.languageFeatures, let textView, !completionPopup.isVisible else { return }
             guard let index, let word = Identifier.wordRange(in: textView.string as NSString, at: index) else {
                 endHover()
                 return
@@ -572,7 +574,7 @@ struct CodeEditorView: NSViewRepresentable {
 
         func commandClick(at index: Int) {
             dismissPopups()
-            guard parent.highlightCode else { return }
+            guard parent.languageFeatures else { return }
             parent.services.definition(index)
         }
 
@@ -618,7 +620,7 @@ struct CodeEditorView: NSViewRepresentable {
         // MARK: Context menu
 
         func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
-            guard parent.highlightCode else { return menu }
+            guard parent.languageFeatures else { return menu }
             // Act on the clicked word, not wherever the caret was.
             let index = (view as? CodeTextView)?.characterIndex(atWindowPoint: event.locationInWindow) ?? charIndex
             if view.selectedRange().length == 0 { view.setSelectedRange(NSRange(location: index, length: 0)) }
