@@ -29,6 +29,12 @@ struct ESPIDEApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var workspace = Workspace()
 
+    init() {
+        // A folder path in argv (`open -a ESPIDE --args ~/project`) is ours to handle; left to AppKit it is
+        // treated as a document to open, and SwiftUI apps linked against the macOS 26 SDK then skip their window.
+        UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
+    }
+
     var body: some Scene {
         WindowGroup("ESP32 IDE") {
             ContentView()
