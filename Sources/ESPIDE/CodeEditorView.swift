@@ -43,7 +43,7 @@ struct CodeEditorView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+        let scrollView = EditorScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
@@ -219,7 +219,7 @@ struct CodeEditorView: NSViewRepresentable {
                 scrollView.reflectScrolledClipView(scrollView.contentView)
             } else {
                 textView.setSelectedRange(NSRange(location: 0, length: 0))
-                textView.scrollToBeginningOfDocument(nil)
+                (scrollView as? EditorScrollView)?.scrollToTopLeft() ?? textView.scrollToBeginningOfDocument(nil)
             }
         }
 
@@ -748,5 +748,31 @@ final class CodeTextView: NSTextView {
             if rect.width > 0, rect.insetBy(dx: -0.5, dy: -0.5).contains(screenPoint) { return candidate }
         }
         return nil
+    }
+}
+
+/// On macOS 14+ rulers overlay the content and the clip view gets a left content inset instead
+/// of a narrower frame; the left edge is then at x = -inset. The inset arrives after the text is
+/// loaded, so without this the view stays at x = 0 and the line numbers cover the first characters.
+final class EditorScrollView: NSScrollView {
+    private var appliedLeftInset: CGFloat = 0
+
+    override func tile() {
+        let wasAtLeftEdge = abs(contentView.bounds.minX + appliedLeftInset) < 0.5
+        super.tile()
+        let inset = contentView.contentInsets.left
+        guard abs(inset - appliedLeftInset) > 0.5 else { return }
+        appliedLeftInset = inset
+        if wasAtLeftEdge {
+            contentView.scroll(to: NSPoint(x: -inset, y: contentView.bounds.minY))
+            reflectScrolledClipView(contentView)
+        }
+    }
+
+    /// The first line and column, past the line-number ruler.
+    func scrollToTopLeft() {
+        let insets = contentView.contentInsets
+        contentView.scroll(to: NSPoint(x: -insets.left, y: -insets.top))
+        reflectScrolledClipView(contentView)
     }
 }
