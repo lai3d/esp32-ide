@@ -53,6 +53,7 @@ ESPIDE_TEST_PORT=/dev/cu.usbserial-110 swift test       # plus a round trip agai
 ESPIDE_IDF_SETUP=~/esp/esp-idf/export.sh ESPIDE_IDF_PROJECT=/tmp/hello_world swift test   # real idf.py build
 swift run ESPIDE ~/path/to/micropython/project
 scripts/bundle.sh                                       # build/ESPIDE.app (ad-hoc signed)
+swift scripts/make-icon.swift                           # regenerate Resources/AppIcon.icns
 ```
 
 Layout:
