@@ -116,6 +116,7 @@ final class Workspace {
     var isReadOnly: Bool { currentFile.map(isReadOnly) ?? false }
 
     func isReadOnly(_ url: URL) -> Bool {
+        if Self.boardPath(ofCached: url) != nil { return false }  // edited copies of board files
         guard let rootURL else { return false }
         let path = Self.key(for: url)
         let root = Self.key(for: rootURL)
@@ -347,6 +348,10 @@ final class Workspace {
         do {
             try document.text.write(to: document.url, atomically: true, encoding: .utf8)
             documents[index].isDirty = false
+            if let remote = Self.boardPath(ofCached: document.url) {
+                // A board file opened from the sidebar: saving writes it back to the board.
+                board.upload(contents: [(remote, Data(document.text.utf8))], force: true)
+            }
             if lspReady, Self.isPython(document.url) {
                 try? lsp?.notify("textDocument/didSave", params: ["textDocument": ["uri": .string(document.url.absoluteString)]])
             }
@@ -763,7 +768,46 @@ final class Workspace {
         board.upload(files.compactMap { url in boardPath(for: url).map { (url, $0) } })
     }
 
-    /// Opens a board file read-only (a copy in the cache folder).
+    /// The board path of a file opened from the Board sidebar (a copy in the cache folder), else nil.
+    nonisolated static func boardPath(ofCached url: URL) -> String? {
+        let path = key(for: url), cache = key(for: boardCacheURL)
+        guard path.hasPrefix(cache + "/") else { return nil }
+        return String(path.dropFirst(cache.count))
+    }
+
+    /// Board → Install Library…
+    func promptInstallLibrary() {
+        let alert = NSAlert()
+        alert.messageText = "Install a library on the board"
+        alert.informativeText = "A micropython-lib package (ssd1306, umqtt.simple, aioble, …), "
+            + "github:user/repo/file.py, or a URL to a .py file. Files go to /lib."
+        let field = NSTextField(string: "")
+        field.placeholderString = "ssd1306"
+        field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Install")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let spec = field.stringValue.trimmingCharacters(in: .whitespaces)
+        if !spec.isEmpty { board.installLibrary(spec) }
+    }
+
+    /// GPIO usage of the project's .py files (open editors' unsaved text included).
+    func pinMap() -> [PinScanner.Pin] {
+        guard let rootURL else { return [] }
+        let sources = ProjectSync.files(in: rootURL).filter { $0.pathExtension == "py" }.compactMap { url -> (URL, String)? in
+            if let open = documents.first(where: { $0.id == Self.key(for: url) }) { return (url, open.text) }
+            return (try? String(contentsOf: url, encoding: .utf8)).map { (url, $0) }
+        }
+        return PinScanner.pins(PinScanner.scan(sources), usesWiFi: PinScanner.usesWiFi(sources))
+    }
+
+    func reveal(_ use: PinScanner.Use) {
+        navigate(to: use.file, position: TextPosition(line: use.line, character: 0))
+    }
+
+    /// Opens a board file for editing (a copy in the cache folder; ⌘S writes it back).
     func openBoardFile(_ file: DeviceFile) {
         guard !file.isDirectory else { return }
         Task {
@@ -924,6 +968,7 @@ final class Workspace {
     }
 
     func relativePath(_ url: URL) -> String {
+        if let remote = Self.boardPath(ofCached: url) { return "board:" + remote }
         guard let root = rootURL?.path, url.path.hasPrefix(root + "/") else { return url.path }
         return String(url.path.dropFirst(root.count + 1))
     }

@@ -103,6 +103,8 @@ struct ESPIDEApp: App {
                 Button("Reload Board Files") { workspace.board.refreshFiles() }
                     .disabled(!workspace.board.isIdle)
                 Divider()
+                Button("Install Library…") { workspace.promptInstallLibrary() }
+                    .disabled(!workspace.board.isIdle)
                 Button("Scan I2C Bus…") { workspace.scanI2C() }
                     .disabled(!workspace.board.isIdle)
                 Button("Flash MicroPython Firmware…") { workspace.showFirmwareSheet = true }

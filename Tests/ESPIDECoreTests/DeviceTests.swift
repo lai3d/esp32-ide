@@ -160,6 +160,23 @@ struct RealBoardTests {
         #expect(hashes["/nope.py"] == nil)
     }
 
+    /// Installs ssd1306 from micropython-lib into a scratch folder, checks it, removes it (needs internet).
+    @Test func installsLibrary() async throws {
+        let files = try await Mip.resolve("ssd1306", target: "/espide_mip", fetch: Mip.fetch)
+        #expect(files.map(\.path) == ["/espide_mip/ssd1306.py"])
+        let data = try await files[0].download(fetch: Mip.fetch)
+        let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)
+        let device = MicroPythonDevice(transport: port)
+        defer { device.close() }
+        let hashes = try await device.withRawREPL { session in
+            try await session.writeFile(files[0].path, contents: data)
+            let hashes = try await session.hashes(of: [files[0].path])
+            try await session.remove("/espide_mip")
+            return hashes
+        }
+        #expect(hashes[files[0].path] == data.sha256Hex)
+    }
+
     /// The LCD1602 backpack on the test board is wired to SDA=21, SCL=22.
     @Test func scansI2C() async throws {
         let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)

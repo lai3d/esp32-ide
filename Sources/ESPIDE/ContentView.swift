@@ -73,7 +73,7 @@ struct WelcomeView: View {
 }
 
 enum SidebarMode: String {
-    case files, outline, board
+    case files, outline, board, pins
 }
 
 struct Sidebar: View {
@@ -85,6 +85,7 @@ struct Sidebar: View {
                 Image(systemName: "folder").help("Files").tag(SidebarMode.files)
                 Image(systemName: "list.bullet.indent").help("Outline").tag(SidebarMode.outline)
                 Image(systemName: "cpu").help("Board files").tag(SidebarMode.board)
+                Image(systemName: "point.3.connected.trianglepath.dotted").help("GPIO usage").tag(SidebarMode.pins)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -94,6 +95,7 @@ struct Sidebar: View {
             case .files: FileTreeView()
             case .outline: OutlineView()
             case .board: BoardFilesView()
+            case .pins: PinsView()
             }
         }
     }
@@ -257,7 +259,8 @@ struct TabItem: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Image(systemName: workspace.isReadOnly(document.url) ? "lock.doc" : "doc.text")
+            Image(systemName: Workspace.boardPath(ofCached: document.url) != nil ? "cpu"
+                  : workspace.isReadOnly(document.url) ? "lock.doc" : "doc.text")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(document.name)

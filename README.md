@@ -14,8 +14,14 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
   Output streams into the Output panel, `input()` works from the input field, **Stop** (⌘.) sends Ctrl-C.
 - **REPL panel**: the board's interactive REPL. ↑/↓ history, Ctrl-C, soft reset (Ctrl-D, re-runs `main.py`).
   **Send Selection to REPL** (⌃↩) uses paste mode, so indented blocks survive.
-- **Board files** (sidebar, chip icon): the board's flash as a tree with sizes. Click to open a read-only copy;
-  right-click to download into the project or delete.
+- **Board files** (sidebar, chip icon): the board's flash as a tree with sizes. Click to open and edit a file — ⌘S writes it
+  back to the board (tabs show `board:/path`). Right-click to download into the project or delete.
+- **Install Library…** (*Board* menu): micropython-lib packages (`ssd1306`, `umqtt.simple`, `aioble`, …) with dependencies,
+  `github:user/repo/file.py`, or a URL to a `.py`. Like `mpremote mip install`, the Mac downloads the files (checked against the
+  index's SHA-256) and copies them to `/lib`, so the board doesn't need Wi-Fi.
+- **GPIO usage** (sidebar, last icon): every pin the project uses — `Pin(…)`, `ADC`/`PWM`, driver keywords like `clk=16`, `*_PIN = 25`
+  constants — with classic-ESP32 warnings: flash pins 6–11, input-only 34–39 driven as outputs, strapping pins (12!), ADC2 with Wi-Fi,
+  UART0, one pin used as two different things. Click a use to jump to it.
 - **Upload** (⌘U) the current file to the same path on the board; **Sync** (⇧⌘S) uploads every changed `.py`/`.json` file of the project.
   Unchanged files are skipped by comparing SHA-256 on the Mac and on the board. `docs/`, `tests/`, hidden folders and `*.example.py` are not uploaded.
 - **MicroPython completion**: *Python → Install MicroPython Stubs* puts `micropython-esp32-stubs` into
@@ -40,7 +46,7 @@ scripts/bundle.sh                                       # build/ESPIDE.app (ad-h
 Layout:
 
 - `Sources/ESPIDECore` — UI-independent: `SerialPort` (termios), `MicroPythonDevice` (raw REPL), `DeviceFiles` (list/read/write/hash/delete),
-  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`,
+  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`,
   plus PyIDE's LSP client and text utilities.
 - `Sources/ESPIDE` — the app: `Board` (connection, REPL, run, files), `Workspace`, editor and views.
 
@@ -48,6 +54,5 @@ Requires macOS 14+ and a board already flashed with MicroPython.
 
 ## Roadmap
 
-- Pin usage map (which GPIOs a project uses, boot-strapping and ADC2 warnings)
-- Edit board files in place; install libraries with `mip`
+- Pin rules for S3/C3 (the map assumes a classic ESP32)
 - ESP-IDF projects (`idf.py build/flash/monitor`)

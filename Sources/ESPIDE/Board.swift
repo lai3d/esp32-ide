@@ -236,8 +236,13 @@ final class Board {
 
     /// Uploads local files to board paths, skipping those whose contents already match.
     func upload(_ items: [(local: URL, remote: String)], force: Bool = false) {
+        upload(contents: items.compactMap { item in (try? Data(contentsOf: item.local)).map { (item.remote, $0) } },
+               force: force)
+    }
+
+    /// Writes data to board paths, skipping files whose contents already match.
+    func upload(contents items: [(String, Data)], force: Bool = false) {
         guard !items.isEmpty else { return }
-        let items = items.compactMap { item in (try? Data(contentsOf: item.local)).map { (item.remote, $0) } }
         perform("Uploading") { session in
             let remoteHashes = force ? [:] : try await session.hashes(of: items.map(\.0))
             let changed = items.filter { remoteHashes[$0.0] != $0.1.sha256Hex }
@@ -278,6 +283,35 @@ final class Board {
             try await session.makeDirectory(path)
             let files = try await session.listFiles()
             await MainActor.run { self.files = files }
+        }
+    }
+
+    /// Installs a micropython-lib package (or a single .py from GitHub / a URL) into /lib.
+    /// The Mac downloads the files, so the board doesn't need Wi-Fi.
+    func installLibrary(_ spec: String) {
+        guard isIdle else {
+            onStatus?(isConnected ? "The board is busy" : "Connect to a board first")
+            return
+        }
+        output = "$ mip install \(spec)\n"
+        onShowPanel?(.output)
+        state = .busy("Downloading \(spec)")
+        Task {
+            do {
+                let files = try await Mip.resolve(spec, fetch: Mip.fetch)
+                var contents: [(String, Data)] = []
+                for file in files {
+                    appendOutput("Downloading \(file.source.absoluteString) → \(file.path)\n")
+                    contents.append((file.path, try await file.download(fetch: Mip.fetch)))
+                }
+                if device != nil { state = .connected }
+                appendOutput("Copying \(contents.count) file\(contents.count == 1 ? "" : "s") to the board…\n")
+                upload(contents: contents, force: true)
+            } catch {
+                appendOutput("\n[\(error.localizedDescription)]\n")
+                onStatus?(error.localizedDescription)
+                if device != nil { state = .connected }
+            }
         }
     }
 
