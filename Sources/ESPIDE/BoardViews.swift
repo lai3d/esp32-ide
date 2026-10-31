@@ -30,6 +30,7 @@ struct BoardPicker: View {
         Button { board.toggleConnection() } label: {
             Label(board.isConnected ? "Disconnect" : "Connect",
                   systemImage: board.isConnected ? "bolt.horizontal.circle.fill" : "bolt.horizontal.circle")
+                .labelStyle(.titleAndIcon)
         }
         .help(board.isConnected ? "Disconnect (frees the port for mpremote / Thonny)" : "Connect to the board (⇧⌘K)")
         .disabled(board.port == nil && !board.isConnected)
