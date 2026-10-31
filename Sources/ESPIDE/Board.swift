@@ -69,7 +69,7 @@ final class Board {
         }
     }
 
-    private var portName: String { (connectedPort ?? port ?? "").replacingOccurrences(of: "/dev/cu.", with: "") }
+    var portName: String { (connectedPort ?? port ?? "").replacingOccurrences(of: "/dev/cu.", with: "") }
 
     init() {
         refreshPorts()
@@ -245,6 +245,26 @@ final class Board {
     func stop() {
         guard isRunning else { return }
         device?.interrupt()
+    }
+
+    /// Lends the device to the MicroPython debugger: the board counts as running (so nothing else
+    /// talks to it) until `finishDebugging`.
+    func beginDebugging(name: String) -> MicroPythonDevice? {
+        guard let device else {
+            onStatus?("Connect to a board first")
+            return nil
+        }
+        guard isIdle else {
+            onStatus?("The board is busy")
+            return nil
+        }
+        output = "$ debug \(name) on \(portName)\n(output is in the Debug panel)\n"
+        isRunning = true
+        return device
+    }
+
+    func finishDebugging() {
+        isRunning = false
     }
 
     private func appendOutput(_ text: String) {
@@ -503,13 +523,5 @@ final class Board {
             }
             if self.device === device { state = .connected }
         }
-    }
-}
-
-extension TerminalText {
-    static func cleaned(_ text: String) -> String {
-        var out = ""
-        append(text, to: &out)
-        return out
     }
 }

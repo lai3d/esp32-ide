@@ -3,7 +3,13 @@ import ESPIDECore
 import Observation
 
 enum BottomTab: Hashable {
-    case problems, output, references, repl, plot
+    case problems, output, references, repl, plot, debug
+}
+
+/// Where a paused debugger is (normalized path, zero-based line).
+struct ExecutionLocation: Equatable {
+    let key: String
+    let line: Int
 }
 
 /// One result of Find References, with its source line for context.
@@ -89,6 +95,13 @@ final class Workspace {
     @ObservationIgnored private var clangd: LSPClient?
     private(set) var clangdReady = false
     @ObservationIgnored private var handledLaunchArguments = false
+
+    /// Breakpoints per normalized path, keyed by zero-based line.
+    var breakpoints: [String: [Int: BreakpointSpec]] = [:]
+    var debugSession: DebugSession?
+    var executionLocation: ExecutionLocation?
+    /// Re-evaluated in the selected frame every time the debugger pauses; kept across sessions.
+    var watchExpressions: [String] = []
 
     init() {
         board.onStatus = { [weak self] in self?.flashStatus($0) }
@@ -187,6 +200,9 @@ final class Workspace {
         guard confirmDiscardOrSave(documents.filter(\.isDirty)) else { return }
         await stopLanguageServer()
         await stopClangd()
+        stopDebugging()
+        debugSession = nil
+        breakpoints = [:]
         rootURL = url
         ToolboxRecents.record(url)
         fileTree = FileNode.loadTree(at: url)
@@ -195,13 +211,15 @@ final class Workspace {
         }
         interpreter = PythonEnvironment.interpreter(for: url)
         isIDFProject = IDFProject.isProject(url)
+        loadBreakpoints()
         buildDiagnostics = [:]
         flashConfirmed = false
         currentFile = nil
         documents = []
         diagnostics = [:]
         backStack = []
-        let preferred = ["main.py", "__main__.py", "app.py", "main/main.c", "main/main.cpp"].lazy.compactMap { Self.firstFile(named: $0, in: self.fileTree) }.first
+        let preferred = isIDFProject ? Self.firstIDFSource(in: fileTree)
+            : ["main.py", "__main__.py", "app.py"].lazy.compactMap { Self.firstFile(named: $0, in: self.fileTree) }.first
         if let first = preferred ?? Self.firstPythonFile(in: fileTree) {
             openFile(first)
         }
@@ -296,6 +314,12 @@ final class Workspace {
 
     private func setText(_ newText: String, at index: Int) {
         guard documents[index].text != newText else { return }
+        // Keep breakpoints on their code as lines are inserted or deleted.
+        let key = documents[index].id
+        if let lines = breakpoints[key], !lines.isEmpty {
+            let moved = LineShift.remap(lines, old: documents[index].text, new: newText)
+            if moved != lines { updateBreakpoints(moved, for: key) }
+        }
         documents[index].text = newText
         documents[index].isDirty = true
         documents[index].version += 1
@@ -591,7 +615,7 @@ final class Workspace {
         navigate(to: point.url, position: point.position)
     }
 
-    private func navigate(to url: URL, position: TextPosition) {
+    func navigate(to url: URL, position: TextPosition) {
         if currentFile.map(Self.key(for:)) != Self.key(for: url) { openFile(url) }
         guard currentFile.map(Self.key(for:)) == Self.key(for: url) else { return }
         revealTarget = RevealTarget(position: position)
@@ -823,7 +847,7 @@ final class Workspace {
     }
 
     /// The current file if it's a .py file, else the project's main.py.
-    private func runTarget() -> URL? {
+    func runTarget() -> URL? {
         if let currentFile, currentFile.pathExtension == "py" { return currentFile }
         return Self.firstFile(named: "main.py", in: fileTree)
     }
@@ -1119,7 +1143,7 @@ final class Workspace {
         }
     }
 
-    private func defaultsKey(_ name: String) -> String { "\(name).\(rootURL.map(Self.key(for:)) ?? "")" }
+    func defaultsKey(_ name: String) -> String { "\(name).\(rootURL.map(Self.key(for:)) ?? "")" }
 
     /// The script that provides idf.py: chosen per project, else found automatically.
     var idfSetupScript: URL? {
@@ -1285,6 +1309,13 @@ final class Workspace {
 
     private static func firstFile(named name: String, in nodes: [FileNode]) -> URL? {
         nodes.first(where: { !$0.isDirectory && $0.name == name })?.url
+    }
+
+    /// The app's entry point in an ESP-IDF project: a C/C++ file in main/ (main.c first).
+    private static func firstIDFSource(in nodes: [FileNode]) -> URL? {
+        let sources = (nodes.first { $0.isDirectory && $0.name == "main" }?.children ?? [])
+            .filter { !$0.isDirectory && CHighlighter.isCSource($0.url) && !$0.name.hasSuffix(".h") }
+        return (sources.first { $0.name.hasPrefix("main.") } ?? sources.first)?.url
     }
 
     private static func firstPythonFile(in nodes: [FileNode]) -> URL? {

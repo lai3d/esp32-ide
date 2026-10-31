@@ -101,7 +101,9 @@ struct CodeEditorView: NSViewRepresentable {
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
 
-        // No debugger on the board yet: clicking a line number selects the line.
+        ruler.onToggleBreakpoint = { [weak coordinator] line in coordinator?.parent.services.toggleBreakpoint(line) }
+        ruler.onEditCondition = { [weak coordinator] line in coordinator?.parent.services.editBreakpointCondition(line) }
+        ruler.onRemoveBreakpoint = { [weak coordinator] line in coordinator?.parent.services.removeBreakpoint(line) }
         coordinator.textView = textView
         coordinator.ruler = ruler
         coordinator.documentID = documentID

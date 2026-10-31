@@ -130,6 +130,40 @@ struct ESPIDEApp: App {
                 Button("Show Plot") { workspace.bottomTab = .plot }
                     .keyboardShortcut("l", modifiers: [.control, .command])
             }
+            CommandMenu("Debug") {
+                Button(workspace.isIDFProject ? "Debug App" : "Debug File") { Task { await workspace.startDebugging() } }
+                    .keyboardShortcut("d", modifiers: [.shift, .command])
+                    .disabled(workspace.rootURL == nil || workspace.isDebugging)
+                if workspace.isIDFProject {
+                    Button("Debug App in QEMU") { Task { await workspace.startIDFDebugging(inQEMU: true) } }
+                        .disabled(workspace.isDebugging)
+                }
+                Button("Stop Debugging") { workspace.stopDebugging() }
+                    .disabled(!workspace.isDebugging)
+                Divider()
+                Button("Continue") { workspace.debugSession?.resume() }
+                    .keyboardShortcut("y", modifiers: [.control, .command])
+                    .disabled(workspace.debugSession?.isStopped != true)
+                Button("Pause") { workspace.debugSession?.pause() }
+                    .disabled(workspace.debugSession?.state != .running)
+                Button("Step Over") { workspace.debugSession?.stepOver() }
+                    .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF6FunctionKey)!)), modifiers: [])
+                    .disabled(workspace.debugSession?.isStopped != true)
+                Button("Step Into") { workspace.debugSession?.stepIn() }
+                    .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF7FunctionKey)!)), modifiers: [])
+                    .disabled(workspace.debugSession?.isStopped != true)
+                Button("Step Out") { workspace.debugSession?.stepOut() }
+                    .keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(NSF8FunctionKey)!)), modifiers: [])
+                    .disabled(workspace.debugSession?.isStopped != true)
+                Divider()
+                Button("Toggle Breakpoint") { workspace.toggleBreakpointAtCaret() }
+                    .keyboardShortcut("\\", modifiers: [.command])
+                    .disabled(!workspace.canSetBreakpoints)
+                Button("Clear All Breakpoints") { workspace.clearAllBreakpoints() }
+                    .disabled(workspace.breakpoints.isEmpty)
+                Divider()
+                Button("Show Debug Panel") { workspace.bottomTab = .debug }
+            }
             CommandMenu("ESP-IDF") {
                 Button("Build") { workspace.runIDF(.build) }
                     .keyboardShortcut("b")

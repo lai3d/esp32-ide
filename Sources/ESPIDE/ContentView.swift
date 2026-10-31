@@ -39,6 +39,7 @@ struct ContentView: View {
                 }
                 .help("Run the current file on the board without saving it there (⌘R)")
                 .disabled(!workspace.board.isIdle)
+                DebugButton()
                 Button { workspace.board.isRunning ? workspace.board.stop() : workspace.board.interrupt() } label: {
                     Label("Stop", systemImage: "stop.fill")
                 }
@@ -209,6 +210,9 @@ struct EditorArea: View {
                         languageFeatures: workspace.hasLanguageFeatures,
                         isEditable: !workspace.isReadOnly,
                         diagnostics: workspace.currentDiagnostics,
+                        breakpointLines: workspace.currentBreakpoints,
+                        conditionalBreakpointLines: workspace.currentConditionalBreakpoints,
+                        executionLine: workspace.currentExecutionLine,
                         reveal: workspace.revealTarget,
                         services: EditorServices(
                             completions: { await workspace.completions(at: $0) },
@@ -217,7 +221,9 @@ struct EditorArea: View {
                             definition: { offset in Task { await workspace.jumpToDefinition(at: offset) } },
                             references: { offset in Task { await workspace.findReferences(at: offset) } },
                             rename: { offset in Task { await workspace.renameSymbol(at: offset) } },
-                            toggleBreakpoint: { _ in },
+                            toggleBreakpoint: { workspace.toggleBreakpoint(line: $0) },
+                            editBreakpointCondition: { workspace.editBreakpointCondition(line: $0) },
+                            removeBreakpoint: { workspace.removeBreakpoint(line: $0) },
                             caretMoved: {
                                 workspace.caretOffset = $0.location
                                 workspace.selectedRange = $0
@@ -366,6 +372,7 @@ struct BottomPanel: View {
                     Text("Output").tag(BottomTab.output)
                     Text(workspace.isIDFProject ? "Monitor" : "REPL").tag(BottomTab.repl)
                     Text("Plot").tag(BottomTab.plot)
+                    Text(workspace.isDebugging ? "Debug ●" : "Debug").tag(BottomTab.debug)
                     if !workspace.references.isEmpty || workspace.bottomTab == .references {
                         Text("References (\(workspace.references.count))").tag(BottomTab.references)
                     }
@@ -398,6 +405,7 @@ struct BottomPanel: View {
             case .references: ReferencesList()
             case .repl: REPLView()
             case .plot: PlotView()
+            case .debug: DebugPanel()
             }
         }
     }
@@ -640,8 +648,26 @@ struct IDFToolbar: View {
         }
         .help(workspace.board.isConnected ? "Close the serial monitor" : "Open the serial monitor")
         .disabled(busy)
+        DebugButton()
         Button { workspace.board.stopTool() } label: { Label("Stop", systemImage: "stop.fill") }
             .help("Stop idf.py (⌘.)")
             .disabled(!busy)
+    }
+}
+
+/// Debug (or stop debugging) — MicroPython on the board, or OpenOCD + GDB in ESP-IDF projects.
+struct DebugButton: View {
+    @Environment(Workspace.self) private var workspace
+
+    var body: some View {
+        if workspace.isDebugging {
+            Button { workspace.stopDebugging() } label: { Label("Stop Debugging", systemImage: "ladybug.slash") }
+                .help("Stop debugging")
+        } else {
+            Button { Task { await workspace.startDebugging() } } label: { Label("Debug", systemImage: "ladybug") }
+                .help(workspace.isIDFProject ? "Debug the app over JTAG with OpenOCD + GDB (⇧⌘D)"
+                      : "Run the current file on the board, stopping at breakpoints (⇧⌘D)")
+                .disabled(workspace.isIDFProject ? workspace.board.isToolRunning : !workspace.board.isIdle)
+        }
     }
 }

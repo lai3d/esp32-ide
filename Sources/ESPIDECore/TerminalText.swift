@@ -3,6 +3,12 @@ import Foundation
 /// Turns raw REPL bytes into display text: CRLF → LF, backspaces erase, ANSI escape sequences
 /// (the REPL's cursor moves and line clears) are dropped.
 public enum TerminalText {
+    public static func cleaned(_ text: String) -> String {
+        var out = ""
+        append(text, to: &out)
+        return out
+    }
+
     public static func append(_ chunk: String, to text: inout String) {
         var escape = false
         for scalar in chunk.unicodeScalars {

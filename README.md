@@ -47,6 +47,18 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
   or one chosen with *ESP-IDF → Choose ESP-IDF…*. Per-project options (`-B build-x -DSDKCONFIG_DEFAULTS="a;b"`) via *Build Options…*.
 - **Markdown**: syntax coloring in the editor, and a rendered **Preview** (Source / Preview in the editor header, ⇧⌘V) with headings,
   lists, task lists, code blocks, quotes and tables (column alignment, CJK-aware widths); relative links open in the IDE.
+- **Debugging** (⇧⌘D, *Debug* menu, Debug panel): click a line number for a breakpoint (right-click for a condition);
+  breakpoints are kept per project. Continue / Step Over (F6) / Step Into (F7) / Step Out (F8), call stack, variables,
+  watch expressions and an evaluation console.
+  - **MicroPython**: MicroPython on the ESP32 has no `sys.settrace`, so ESPIDE adds a probe in front of every statement
+    of the file it runs (on the same line, so tracebacks keep their line numbers) and talks to it over the serial line.
+    The probe costs a function call per statement; locals are read only when the program stops. Only the debugged file
+    stops (imported modules run normally), `@micropython.native`/`viper` functions aren't probed, and variables can't be
+    changed. Stepping over a `return` stops at the next statement anywhere.
+  - **ESP-IDF**: OpenOCD + ESP's GDB in DAP mode (`gdb -i dap`), attached on :3333; the chip is reset and runs with the
+    breakpoints in place. The S3/C3/C6 use their built-in USB-JTAG; the classic ESP32 needs an adapter such as ESP-Prog.
+    **Debug App in QEMU** runs the app in Espressif's emulator (ESP32, S3, C3) instead — no hardware needed; install it once
+    with `idf_tools.py install qemu-xtensa`.
 - Open a file from the command line (`ESPIDE path/to/file.md`): its git repository (or folder) opens as the project.
 - From PyIDE: tabs, Python highlighting and editing, pyright completion / hover / go to definition / references / rename, Outline, ruff formatting.
 
@@ -56,6 +68,9 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
 swift test                                              # unit tests (fake board)
 ESPIDE_TEST_PORT=/dev/cu.usbserial-110 swift test       # plus a round trip against a real board
 ESPIDE_IDF_SETUP=~/esp/esp-idf/export.sh ESPIDE_IDF_PROJECT=/tmp/hello_world swift test   # real idf.py build
+ESPIDE_IDF_SETUP=~/esp/esp-idf/export.sh ESPIDE_QEMU_PROJECT=/tmp/hello_world swift test   # GDB/DAP against QEMU
+ESPIDE_INSTRUMENT_DIR=~/path/to/micropython/project swift test   # its files still compile once instrumented
+ESPIDE_TRACE_DAP=1 swift run ESPIDE …                   # log debug adapter traffic
 swift run ESPIDE ~/path/to/micropython/project
 scripts/bundle.sh                                       # build/ESPIDE.app (ad-hoc signed)
 swift scripts/make-icon.swift                           # regenerate Resources/AppIcon.icns
@@ -64,7 +79,7 @@ swift scripts/make-icon.swift                           # regenerate Resources/A
 Layout:
 
 - `Sources/ESPIDECore` — UI-independent: `SerialPort` (termios), `MicroPythonDevice` (raw REPL), `DeviceFiles` (list/read/write/hash/delete),
-  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`, `Markdown`, `IDFProject`, `CHighlighter`, `Clangd`,
+  `ProjectSync`, `PythonInstrumenter` + `MicroPythonDebugger` (the MicroPython debugger), `IDFDebug`, `DAPClient`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`, `Markdown`, `IDFProject`, `CHighlighter`, `Clangd`,
   plus PyIDE's LSP client and text utilities.
 - `Sources/ESPIDE` — the app: `Board` (connection, REPL, run, files), `Workspace`, editor and views.
 
@@ -73,4 +88,4 @@ ESP-IDF features need an ESP-IDF install.
 
 ## Roadmap
 
-- Debugging ESP-IDF apps with OpenOCD + GDB
+- Testing ESP-IDF debugging on real USB-JTAG hardware (so far: GDB/DAP verified against QEMU)
