@@ -9,6 +9,8 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
 
 - **Board connection**: lists USB serial ports (`/dev/cu.usbserial-*`, `cu.usbmodem*`, `cu.SLAB_USBtoUART`, …) and refreshes as boards are plugged in.
   The port is opened exclusively, so another tool (mpremote, Thonny) can't interleave bytes; **Disconnect** frees it.
+  *Board → Connect Automatically* connects at launch and whenever a board is plugged in (after a manual Disconnect it waits for a replug).
+  Connecting reads the board's files, which stops a running `main.py`; **Reset** starts it again.
 - **Raw REPL protocol in Swift** (what `mpremote` does): Ctrl-A raw mode, code sent in small chunks, `OK<stdout>\x04<stderr>\x04>` replies, streamed output.
 - **Run** (⌘R): runs the current file (or `main.py`) on a freshly soft-reset interpreter without saving it on the board.
   Output streams into the Output panel, `input()` works from the input field, **Stop** (⌘.) sends Ctrl-C.

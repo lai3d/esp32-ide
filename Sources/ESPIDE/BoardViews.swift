@@ -23,8 +23,9 @@ struct BoardPicker: View {
             Button("Refresh") { board.refreshPorts() }
         } label: {
             Label(Self.short(board.port) ?? "No board", systemImage: "cable.connector")
+                .labelStyle(.titleAndIcon)
         }
-        .help("Serial port")
+        .help(board.port ?? "No board found")
         .disabled(board.isRunning)
         Button { board.toggleConnection() } label: {
             Label(board.isConnected ? "Disconnect" : "Connect",
@@ -48,7 +49,16 @@ struct BoardFilesView: View {
         let board = workspace.board
         VStack(spacing: 0) {
             if !board.isConnected {
-                placeholder("Connect a board to see its files")
+                VStack(spacing: 10) {
+                    Text(board.port == nil ? "No board found — plug one in with a data USB cable" : "Connect to see the board's files")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    if board.port != nil {
+                        Button("Connect") { board.connect() }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if !board.filesLoaded {
                 placeholder(board.isRunning ? "Stop the program to read files" : "Reading files…")
             } else if board.files.isEmpty {

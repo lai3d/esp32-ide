@@ -83,6 +83,7 @@ struct ESPIDEApp: App {
             CommandMenu("Board") {
                 Button(workspace.board.isConnected ? "Disconnect" : "Connect") { workspace.board.toggleConnection() }
                     .keyboardShortcut("k", modifiers: [.shift, .command])
+                Toggle("Connect Automatically", isOn: Bindable(workspace.board).autoConnect)
                 Divider()
                 Button("Run File on Board") { workspace.runOnBoard() }
                     .keyboardShortcut("r")

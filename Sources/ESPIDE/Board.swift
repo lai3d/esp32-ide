@@ -19,6 +19,12 @@ final class Board {
         didSet { UserDefaults.standard.set(port, forKey: "port") }
     }
     private(set) var state: State = .disconnected
+    /// Connect when a board appears (and at launch). Connecting stops a running main.py.
+    var autoConnect: Bool = UserDefaults.standard.bool(forKey: "autoConnect") {
+        didSet { UserDefaults.standard.set(autoConnect, forKey: "autoConnect") }
+    }
+    /// Set by Disconnect so auto-connect waits until the board is unplugged and plugged in again.
+    @ObservationIgnored private var heldDisconnected: String?
     private(set) var connectedPort: String?
     /// The interactive REPL transcript.
     private(set) var terminal = ""
@@ -73,16 +79,31 @@ final class Board {
     }
 
     func refreshPorts() {
+        let found = scanPorts()
+        if let held = heldDisconnected, !found.contains(held) { heldDisconnected = nil }  // unplugged
+        if autoConnect, !isConnected, !isFlashing, !isToolRunning, let port, found.contains(port),
+           heldDisconnected != port {
+            connect()
+            // Don't retry every scan if it failed (port busy, …); wait for a replug.
+            if !isConnected { heldDisconnected = port }
+        }
+    }
+
+    /// Updates the port list and the chosen port, without connecting.
+    @discardableResult
+    private func scanPorts() -> [String] {
         let found = SerialPort.availablePorts()
         if found != ports { ports = found }
         if port == nil || !(ports.contains(port!) || port == connectedPort) { port = ports.first ?? port }
+        return found
     }
 
     // MARK: - Connection
 
     func connect() {
         guard device == nil else { return }
-        refreshPorts()
+        heldDisconnected = nil
+        scanPorts()
         guard let port else {
             onStatus?("No board found — plug it in with a data USB cable")
             return
@@ -109,6 +130,7 @@ final class Board {
     }
 
     func disconnect() {
+        heldDisconnected = connectedPort
         runTask?.cancel()
         device?.close()
         handleDisconnect(message: "Disconnected")
