@@ -179,6 +179,46 @@ struct RealBoardTests {
         #expect(hashes[files[0].path] == data.sha256Hex)
     }
 
+    /// Typing a line into the friendly REPL: the echo and output come back intact.
+    @Test func terminalLineRoundTrip() async throws {
+        let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)
+        let device = MicroPythonDevice(transport: port)
+        defer { device.close() }
+        let collected = Collector()
+        device.onTerminalOutput = { collected.append($0) }
+        device.interrupt()
+        try await Task.sleep(for: .milliseconds(300))
+        try device.sendTerminal("for i in range(3): print((i+1)*7)\r")
+        try await Task.sleep(for: .milliseconds(200))
+        try device.sendTerminal("\r")
+        try await Task.sleep(for: .milliseconds(500))
+        var text = ""
+        TerminalText.append(collected.text, to: &text)
+        #expect(text.contains("for i in range(3): print((i+1)*7)"), "\(text)")
+        #expect(text.contains("7\n14\n21"), "\(text)")
+    }
+
+    /// The app's sequence: list files over the raw REPL, Ctrl-C, then type lines into the friendly REPL.
+    @Test func terminalAfterRawREPL() async throws {
+        let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)
+        let device = MicroPythonDevice(transport: port)
+        defer { device.close() }
+        let collected = Collector()
+        device.onTerminalOutput = { collected.append($0) }
+        _ = try await device.withRawREPL { try await $0.listFiles() }
+        device.interrupt()
+        try await Task.sleep(for: .milliseconds(300))
+        for n in 1...5 {
+            try device.sendTerminal("print(\"line\", (\(n)+1)*(2))\r")
+            try await Task.sleep(for: .milliseconds(300))
+        }
+        var text = ""
+        TerminalText.append(collected.text, to: &text)
+        for n in 1...5 {
+            #expect(text.contains("print(\"line\", (\(n)+1)*(2))"), "\(text)")
+        }
+    }
+
     /// The LCD1602 backpack on the test board is wired to SDA=21, SCL=22.
     @Test func scansI2C() async throws {
         let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)

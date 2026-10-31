@@ -38,6 +38,8 @@ public final class SerialPort: DeviceTransport, @unchecked Sendable {
     private var _onData: (@Sendable (Data) -> Void)?
     private var _onClose: (@Sendable () -> Void)?
     public let path: String
+    /// ESPIDE_TRACE_SERIAL=1 logs every byte read and written to stderr.
+    static let trace = ProcessInfo.processInfo.environment["ESPIDE_TRACE_SERIAL"] != nil
 
     public var onData: (@Sendable (Data) -> Void)? {
         get { lock.withLock { _onData } }
@@ -92,6 +94,7 @@ public final class SerialPort: DeviceTransport, @unchecked Sendable {
         guard fd >= 0 else { return }
         let count = Darwin.read(fd, &buffer, buffer.count)
         if count > 0 {
+            if Self.trace { FileHandle.standardError.write(Data("R \(String(decoding: buffer[0..<count], as: UTF8.self).debugDescription)\n".utf8)) }
             onData?(Data(buffer[0..<count]))
         } else if count == 0 || (errno != EAGAIN && errno != EINTR) {
             // EOF or ENXIO: the USB device disappeared.
@@ -102,6 +105,7 @@ public final class SerialPort: DeviceTransport, @unchecked Sendable {
     }
 
     public func write(_ data: Data) throws {
+        if Self.trace { FileHandle.standardError.write(Data("W \(data.map { String(format: "%02x", $0) }.joined()) \(String(decoding: data, as: UTF8.self).debugDescription)\n".utf8)) }
         let fd = lock.withLock { self.fd }
         guard fd >= 0 else { throw SerialError.closed }
         try data.withUnsafeBytes { raw in
