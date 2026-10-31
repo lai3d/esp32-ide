@@ -26,6 +26,13 @@ final class Board {
     private(set) var output = ""
     private(set) var isRunning = false
     private(set) var files: [DeviceFile] = []
+    /// Numbers printed by the board, for the Plot panel.
+    private(set) var plot = PlotData()
+    /// esptool is writing firmware (the port is closed meanwhile).
+    private(set) var isFlashing = false
+    private(set) var flashProgress: Double?
+    /// Everything the last `runTool` printed.
+    @ObservationIgnored private var toolOutput = ""
     private(set) var filesLoaded = false
     /// Set when something fails, shown in the status bar.
     var onStatus: ((String) -> Void)?
@@ -41,7 +48,7 @@ final class Board {
 
     var statusLabel: String {
         switch state {
-        case .disconnected: "Not connected"
+        case .disconnected: isFlashing ? "Flashing firmware…" : "Not connected"
         case .connected: isRunning ? "Running on \(portName)" : "Connected: \(portName)"
         case let .busy(what): "\(what)…"
         }
@@ -158,7 +165,10 @@ final class Board {
 
     func clearTerminal() { terminal = "" }
 
+    func clearPlot() { plot.clear() }
+
     private func appendTerminal(_ text: String) {
+        plot.feed(TerminalText.cleaned(text))
         TerminalText.append(text, to: &terminal)
         if terminal.utf16.count > 400_000 { terminal = String(terminal.suffix(300_000)) }
     }
@@ -207,6 +217,7 @@ final class Board {
     }
 
     private func appendOutput(_ text: String) {
+        plot.feed(TerminalText.cleaned(text))
         TerminalText.append(text, to: &output)
         if output.utf16.count > 400_000 { output = String(output.suffix(300_000)) }
     }
@@ -268,6 +279,120 @@ final class Board {
             let files = try await session.listFiles()
             await MainActor.run { self.files = files }
         }
+    }
+
+    // MARK: - I2C
+
+    func scanI2C(sda: Int, scl: Int) {
+        output = "$ I2C scan (SDA=G\(sda), SCL=G\(scl))\n"
+        onShowPanel?(.output)
+        perform("Scanning I2C") { session in
+            let result = try await session.exec(I2C.scanScript(sda: sda, scl: scl))
+            await MainActor.run {
+                guard let addresses = I2C.parseScan(result) else {
+                    self.appendOutput(result)
+                    return
+                }
+                self.appendOutput(addresses.isEmpty
+                    ? "No devices found. Check wiring, power (3V3/GND) and the SDA/SCL pins.\n"
+                    : addresses.map(I2C.describe).joined(separator: "\n") + "\n")
+            }
+        }
+    }
+
+    // MARK: - Tools and firmware
+
+    /// Runs a command-line tool, streaming its output into the Output panel. Returns the exit status.
+    func runTool(_ executable: URL, _ arguments: [String], title: String) async -> Int32 {
+        toolOutput = ""
+        appendOutput("$ \(executable.lastPathComponent) \(arguments.joined(separator: " "))\n")
+        return await withCheckedContinuation { continuation in
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = arguments
+            process.environment = ToolLocator.environment()
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty { handle.readabilityHandler = nil; return }
+                // esptool redraws its progress line with \r; show each update on its own line.
+                let chunk = String(decoding: data, as: UTF8.self)
+                    .replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+                Task { @MainActor in
+                    self.appendOutput(chunk)
+                    self.toolOutput += chunk
+                    if self.isFlashing, let progress = Firmware.progress(inOutput: chunk) { self.flashProgress = progress }
+                }
+            }
+            process.terminationHandler = { proc in
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(50))  // let the last output land
+                    continuation.resume(returning: proc.terminationStatus)
+                }
+            }
+            do {
+                try process.run()
+            } catch {
+                appendOutput("Failed to start \(executable.lastPathComponent): \(error.localizedDescription)\n")
+                continuation.resume(returning: -1)
+            }
+        }
+    }
+
+    /// Asks esptool which chip is on the port (resets the board).
+    func detectChip(interpreter: URL?) async -> Firmware.Family? {
+        guard let port, let (tool, prefix) = Firmware.esptool(interpreter: interpreter) else { return nil }
+        let wasConnected = isConnected
+        if wasConnected { disconnect() }
+        isFlashing = true
+        defer { isFlashing = false }
+        output = ""
+        onShowPanel?(.output)
+        _ = await runTool(tool, prefix + Firmware.chipIDArguments(port: port), title: "Detecting chip")
+        if wasConnected { connect() }
+        return Firmware.chipDescription(inOutput: toolOutput).flatMap(Firmware.Family.init(chipDescription:))
+    }
+
+    /// Erases (optionally) and writes a MicroPython image, then reconnects.
+    @discardableResult
+    func flash(image: URL, family: Firmware.Family, erase: Bool, interpreter: URL?) async -> Bool {
+        guard let port else {
+            onStatus?("No board found")
+            return false
+        }
+        guard let (tool, prefix) = Firmware.esptool(interpreter: interpreter) else {
+            onStatus?("esptool not found — brew install uv (ESPIDE then uses uvx esptool)")
+            return false
+        }
+        if isConnected { disconnect() }
+        isFlashing = true
+        flashProgress = 0
+        output = ""
+        onShowPanel?(.output)
+        defer {
+            isFlashing = false
+            flashProgress = nil
+        }
+        if erase {
+            let status = await runTool(tool, prefix + Firmware.eraseArguments(port: port), title: "Erasing flash")
+            guard status == 0 else {
+                appendOutput("\n[erase failed with status \(status)]\n")
+                return false
+            }
+        }
+        let status = await runTool(tool, prefix + Firmware.writeArguments(port: port, image: image, family: family),
+                                   title: "Writing firmware")
+        guard status == 0 else {
+            appendOutput("\n[flashing failed with status \(status)]\n")
+            return false
+        }
+        appendOutput("\n[firmware written — reconnecting]\n")
+        // The board resets after esptool; give MicroPython a moment to boot.
+        try? await Task.sleep(for: .seconds(2))
+        connect()
+        return true
     }
 
     /// Runs a raw-REPL command, showing it in the status bar while it works.

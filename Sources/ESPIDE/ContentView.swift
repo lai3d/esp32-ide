@@ -49,6 +49,7 @@ struct ContentView: View {
             }
         }
         .task { await workspace.handleLaunchArguments() }
+        .sheet(isPresented: Bindable(workspace).showFirmwareSheet) { FirmwareView().environment(workspace) }
     }
 }
 
@@ -340,6 +341,7 @@ struct BottomPanel: View {
                     Text("Problems (\(workspace.allProblems.count))").tag(BottomTab.problems)
                     Text("Output").tag(BottomTab.output)
                     Text("REPL").tag(BottomTab.repl)
+                    Text("Plot").tag(BottomTab.plot)
                     if !workspace.references.isEmpty || workspace.bottomTab == .references {
                         Text("References (\(workspace.references.count))").tag(BottomTab.references)
                     }
@@ -348,7 +350,7 @@ struct BottomPanel: View {
                 .labelsHidden()
                 .fixedSize()
                 Spacer()
-                if workspace.board.isRunning || !workspace.board.isIdle && workspace.board.isConnected {
+                if workspace.board.isRunning || workspace.board.isFlashing || !workspace.board.isIdle && workspace.board.isConnected {
                     ProgressView().controlSize(.small)
                 }
                 Label(workspace.board.statusLabel, systemImage: workspace.board.isConnected ? "cable.connector" : "cable.connector.slash")
@@ -370,6 +372,7 @@ struct BottomPanel: View {
             case .output: OutputView()
             case .references: ReferencesList()
             case .repl: REPLView()
+            case .plot: PlotView()
             }
         }
     }

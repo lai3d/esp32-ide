@@ -3,7 +3,7 @@ import ESPIDECore
 import Observation
 
 enum BottomTab: Hashable {
-    case problems, output, references, repl
+    case problems, output, references, repl, plot
 }
 
 /// One result of Find References, with its source line for context.
@@ -594,9 +594,10 @@ final class Workspace {
         }
         lspName = spec.name
         let pythonPath = interpreter?.path
+        let stubs = MicroPythonStubs.isInstalled ? MicroPythonStubs.directory : nil
         let client = LSPClient()
         client.configurationProvider = { items in
-            LanguageServerSpec.configuration(items: items, pythonPath: pythonPath)
+            LanguageServerSpec.configuration(items: items, pythonPath: pythonPath, stubs: stubs)
         }
         client.onNotification = { method, params in
             Task { @MainActor in self.handleNotification(client, method: method, params: params) }
@@ -620,7 +621,8 @@ final class Workspace {
             try client.notify("initialized", params: [:])
             try client.notify("workspace/didChangeConfiguration", params: ["settings": [:]])
             lspReady = true
-            lspStatus = "\(spec.name): ready"
+            lspStatus = stubs == nil ? "\(spec.name): ready — Python → Install MicroPython Stubs for machine/network completion"
+                : "\(spec.name): ready (MicroPython stubs)"
             scheduleOutlineRefresh(after: .zero)
             documents.forEach(sendDidOpen)
         } catch {
@@ -836,6 +838,77 @@ final class Workspace {
         }
         board.paste(code)
     }
+
+    /// Installs micropython-esp32-stubs into ESPIDE's support folder and restarts pyright.
+    func installStubs() {
+        guard let (executable, arguments) = MicroPythonStubs.installCommand(interpreter: interpreter) else {
+            flashStatus("Neither uv nor python3 found — brew install uv")
+            return
+        }
+        bottomTab = .output
+        Task {
+            let status = await board.runTool(executable, arguments, title: "Installing MicroPython stubs")
+            if status == 0 && MicroPythonStubs.isInstalled {
+                flashStatus("MicroPython stubs installed")
+                await restartLanguageServer()
+            } else {
+                flashStatus("Installing stubs failed (status \(status)) — see Output")
+            }
+        }
+    }
+
+    /// Downloads the newest stable image for a chip family (cached by file name).
+    func downloadLatestFirmware(_ family: Firmware.Family) async -> URL? {
+        do {
+            let (page, _) = try await URLSession.shared.data(from: family.downloadPage)
+            guard let remote = Firmware.latestImage(onPage: String(decoding: page, as: UTF8.self), family: family) else {
+                flashStatus("No firmware found on \(family.downloadPage.absoluteString)")
+                return nil
+            }
+            let folder = Self.boardCacheURL.deletingLastPathComponent().appendingPathComponent("firmware")
+            let local = folder.appendingPathComponent(remote.lastPathComponent)
+            if FileManager.default.fileExists(atPath: local.path) { return local }
+            flashStatus("Downloading \(remote.lastPathComponent)…")
+            let (downloaded, response) = try await URLSession.shared.download(from: remote)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                flashStatus("Download failed: \(remote.absoluteString)")
+                return nil
+            }
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: local)
+            try FileManager.default.moveItem(at: downloaded, to: local)
+            return local
+        } catch {
+            flashStatus("Download failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Board → Scan I2C Bus…: asks for the pins (remembered), then lists what answers.
+    func scanI2C() {
+        let defaults = UserDefaults.standard
+        let alert = NSAlert()
+        alert.messageText = "Scan I2C bus"
+        alert.informativeText = "GPIO numbers of the bus to scan (software I2C, any pins)."
+        let sda = NSTextField(string: String(defaults.object(forKey: "i2cSDA") as? Int ?? 21))
+        let scl = NSTextField(string: String(defaults.object(forKey: "i2cSCL") as? Int ?? 22))
+        let grid = NSGridView(views: [[NSTextField(labelWithString: "SDA"), sda], [NSTextField(labelWithString: "SCL"), scl]])
+        grid.frame = NSRect(x: 0, y: 0, width: 160, height: 56)
+        alert.accessoryView = grid
+        alert.addButton(withTitle: "Scan")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = sda
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let sdaPin = Int(sda.stringValue.trimmingCharacters(in: .whitespaces)),
+              let sclPin = Int(scl.stringValue.trimmingCharacters(in: .whitespaces))
+        else { return }
+        defaults.set(sdaPin, forKey: "i2cSDA")
+        defaults.set(sclPin, forKey: "i2cSCL")
+        board.scanI2C(sda: sdaPin, scl: sclPin)
+    }
+
+    /// Shows the Flash Firmware sheet.
+    var showFirmwareSheet = false
 
     nonisolated static let boardCacheURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ESPIDE/board", isDirectory: true)

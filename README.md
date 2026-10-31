@@ -18,8 +18,15 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
   right-click to download into the project or delete.
 - **Upload** (⌘U) the current file to the same path on the board; **Sync** (⇧⌘S) uploads every changed `.py`/`.json` file of the project.
   Unchanged files are skipped by comparing SHA-256 on the Mac and on the board. `docs/`, `tests/`, hidden folders and `*.example.py` are not uploaded.
+- **MicroPython completion**: *Python → Install MicroPython Stubs* puts `micropython-esp32-stubs` into
+  `~/Library/Application Support/ESPIDE/stubs` (your project is not modified) and points pyright at them, so `machine`, `network`, `neopixel`, …
+  complete and type-check against MicroPython's own standard library. Without stubs, unresolved imports are silenced.
+- **Flash firmware** (*Board → Flash MicroPython Firmware…*): detect the chip with esptool, download the latest stable image from
+  micropython.org (or pick a `.bin`), optionally erase, write at the right offset (0x1000 for ESP32, 0x0 for S2/S3/C3/C6) with a progress bar,
+  then reconnect. Uses an installed `esptool`, else `uvx esptool`, else `python -m esptool`.
+- **Plot** panel (⌃⌘L): a live chart of numbers the board prints — `print(t)`, `print(t, p)` or `print("t=", t, "p=", p)` (named series).
+- **I2C scan** (*Board → Scan I2C Bus…*): scans any SDA/SCL pins and names common parts (0x27 LCD backpack, 0x3C SSD1306, 0x76 BMP280, 0x68 MPU6050, …).
 - From PyIDE: tabs, Python highlighting and editing, pyright completion / hover / go to definition / references / rename, Outline, ruff formatting.
-  Unresolved imports are silenced for now, since `machine`, `network` etc. only exist on the board.
 
 ## Develop
 
@@ -33,15 +40,14 @@ scripts/bundle.sh                                       # build/ESPIDE.app (ad-h
 Layout:
 
 - `Sources/ESPIDECore` — UI-independent: `SerialPort` (termios), `MicroPythonDevice` (raw REPL), `DeviceFiles` (list/read/write/hash/delete),
-  `ProjectSync`, plus PyIDE's LSP client and text utilities.
+  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`,
+  plus PyIDE's LSP client and text utilities.
 - `Sources/ESPIDE` — the app: `Board` (connection, REPL, run, files), `Workspace`, editor and views.
 
 Requires macOS 14+ and a board already flashed with MicroPython.
 
 ## Roadmap
 
-- Flash MicroPython firmware (esptool) with a progress bar
-- MicroPython stubs for pyright (`micropython-esp32-stubs`) instead of silencing imports
-- Serial plotter for numbers a program prints
-- I2C scan, pin usage map
-- Edit board files in place; ESP-IDF projects (`idf.py build/flash/monitor`)
+- Pin usage map (which GPIOs a project uses, boot-strapping and ADC2 warnings)
+- Edit board files in place; install libraries with `mip`
+- ESP-IDF projects (`idf.py build/flash/monitor`)

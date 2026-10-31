@@ -1,3 +1,4 @@
+import ESPIDECore
 import AppKit
 import SwiftUI
 
@@ -102,11 +103,18 @@ struct ESPIDEApp: App {
                 Button("Reload Board Files") { workspace.board.refreshFiles() }
                     .disabled(!workspace.board.isIdle)
                 Divider()
+                Button("Scan I2C Bus…") { workspace.scanI2C() }
+                    .disabled(!workspace.board.isIdle)
+                Button("Flash MicroPython Firmware…") { workspace.showFirmwareSheet = true }
+                    .disabled(workspace.board.isRunning || workspace.board.isFlashing)
+                Divider()
                 Button("Send Selection to REPL") { workspace.sendSelectionToREPL() }
                     .keyboardShortcut(.return, modifiers: [.control])
                     .disabled(!workspace.board.isIdle)
                 Button("Show REPL") { workspace.bottomTab = .repl }
                     .keyboardShortcut("p", modifiers: [.control, .command])
+                Button("Show Plot") { workspace.bottomTab = .plot }
+                    .keyboardShortcut("l", modifiers: [.control, .command])
             }
             CommandMenu("Python") {
                 Button("Format Document") { workspace.formatDocument() }
@@ -120,6 +128,9 @@ struct ESPIDEApp: App {
                     .disabled(!workspace.isPythonFile || workspace.isReadOnly)
                 Toggle("Format on Save", isOn: Bindable(workspace).formatOnSave)
                 Divider()
+                Button(MicroPythonStubs.isInstalled ? "Update MicroPython Stubs" : "Install MicroPython Stubs") {
+                    workspace.installStubs()
+                }
                 Button("Choose Interpreter…") { workspace.presentInterpreterPanel() }
                     .disabled(workspace.rootURL == nil)
                 Button("Restart Language Server") { Task { await workspace.restartLanguageServer() } }

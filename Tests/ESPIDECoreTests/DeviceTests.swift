@@ -137,7 +137,7 @@ final class FakeBoard: DeviceTransport, @unchecked Sendable {
 }
 
 /// Runs against a real board when ESPIDE_TEST_PORT is set, e.g. ESPIDE_TEST_PORT=/dev/cu.usbserial-110.
-@Suite(.enabled(if: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"] != nil))
+@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"] != nil))
 struct RealBoardTests {
     @Test func roundTrip() async throws {
         let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)
@@ -158,6 +158,15 @@ struct RealBoardTests {
         #expect(listed.contains { $0.path == "/espide_test" })
         #expect(hashes["/espide_test/t.py"] == contents.sha256Hex)
         #expect(hashes["/nope.py"] == nil)
+    }
+
+    /// The LCD1602 backpack on the test board is wired to SDA=21, SCL=22.
+    @Test func scansI2C() async throws {
+        let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)
+        let device = MicroPythonDevice(transport: port)
+        defer { device.close() }
+        let output = try await device.exec(I2C.scanScript(sda: 21, scl: 22))
+        #expect(I2C.parseScan(output)?.contains(0x27) == true)
     }
 }
 

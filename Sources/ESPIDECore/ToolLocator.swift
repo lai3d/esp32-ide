@@ -122,36 +122,31 @@ public struct LanguageServerSpec: Sendable, Hashable {
 
     public static let installHint = "npm install -g pyright   (or: uv tool install basedpyright)"
 
-    /// Answers a `workspace/configuration` request: tells pyright which interpreter to use.
-    public static func configuration(items: [JSONValue], pythonPath: String?) -> JSONValue {
-        .array(items.map { item in
+    /// Answers a `workspace/configuration` request: tells pyright which interpreter and which
+    /// MicroPython stubs (if installed) to use.
+    public static func configuration(items: [JSONValue], pythonPath: String?, stubs: URL? = nil) -> JSONValue {
+        var settings: [String: JSONValue] = [
+            "autoSearchPaths": true,
+            "useLibraryCodeForTypes": true,
+            "diagnosticMode": "openFilesOnly",
+            "typeCheckingMode": "standard",
+        ]
+        settings.merge(MicroPythonStubs.analysisSettings(stubs: stubs)) { $1 }
+        let analysis = JSONValue.object(settings)
+        return .array(items.map { item in
             switch item["section"]?.stringValue {
             case "python":
                 var python: [String: JSONValue] = [:]
                 if let pythonPath { python["pythonPath"] = .string(pythonPath) }
-                python["analysis"] = analysisSettings
+                python["analysis"] = analysis
                 return .object(python)
             case "python.analysis", "basedpyright.analysis":
-                return analysisSettings
+                return analysis
             case "basedpyright":
-                return ["analysis": analysisSettings]
+                return ["analysis": analysis]
             default:
                 return .null
             }
         })
     }
-
-    private static let analysisSettings: JSONValue = [
-        "autoSearchPaths": true,
-        "useLibraryCodeForTypes": true,
-        "diagnosticMode": "openFilesOnly",
-        "typeCheckingMode": "standard",
-        // MicroPython modules (machine, network, …) don't exist on the Mac. Until board stubs are
-        // installed, an unresolved import is noise rather than a mistake.
-        "diagnosticSeverityOverrides": [
-            "reportMissingImports": "none",
-            "reportMissingModuleSource": "none",
-            "reportAttributeAccessIssue": "warning",
-        ],
-    ]
 }
