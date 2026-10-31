@@ -47,6 +47,8 @@ final class Board {
     private(set) var machine: String?
     /// Set when something fails, shown in the status bar.
     var onStatus: ((String) -> Void)?
+    /// Called after the board's file list is (re)read.
+    var onFilesLoaded: (() -> Void)?
     /// Switches the bottom panel (Output / REPL) when a command starts.
     var onShowPanel: ((BottomTab) -> Void)?
 
@@ -259,6 +261,7 @@ final class Board {
                 self.files = files
                 self.filesLoaded = true
                 if let machine { self.machine = machine.trimmingCharacters(in: .whitespacesAndNewlines) }
+                self.onFilesLoaded?()
             }
         }
     }
@@ -340,6 +343,19 @@ final class Board {
                 appendOutput("\n[\(error.localizedDescription)]\n")
                 onStatus?(error.localizedDescription)
                 if device != nil { state = .connected }
+            }
+        }
+    }
+
+    /// Asks the board for the public names and types of modules (see BoardModules); values stay on the board.
+    func describeModules(_ modules: [String]) async -> [String: String] {
+        await withCheckedContinuation { continuation in
+            perform("Reading board modules", onFailure: { continuation.resume(returning: [:]) }) { session in
+                var result: [String: String] = [:]
+                for module in modules {
+                    if let output = try? await session.exec(BoardModules.describeScript(module)) { result[module] = output }
+                }
+                continuation.resume(returning: result)
             }
         }
     }

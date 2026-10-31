@@ -33,6 +33,8 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
 - **Flash firmware** (*Board → Flash MicroPython Firmware…*): detect the chip with esptool, download the latest stable image from
   micropython.org (or pick a `.bin`), optionally erase, write at the right offset (0x1000 for ESP32, 0x0 for S2/S3/C3/C6) with a progress bar,
   then reconnect. Uses an installed `esptool`, else `uvx esptool`, else `python -m esptool`.
+- **Board-only modules**: when a module the project imports exists only on the board (a `secrets.py` kept out of git), the board reports its
+  public names and types — never values — and ESPIDE writes a `.pyi` stub in its cache so pyright stops flagging `WIFI_SSID` etc.
 - **Plot** panel (⌃⌘L): a live chart of numbers the board prints — `print(t)`, `print(t, p)` or `print("t=", t, "p=", p)` (named series).
 - **I2C scan** (*Board → Scan I2C Bus…*): scans any SDA/SCL pins and names common parts (0x27 LCD backpack, 0x3C SSD1306, 0x76 BMP280, 0x68 MPU6050, …).
 - **ESP-IDF projects** (folders whose `CMakeLists.txt` includes `project.cmake`): the toolbar switches to

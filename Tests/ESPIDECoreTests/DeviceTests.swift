@@ -219,6 +219,17 @@ struct RealBoardTests {
         }
     }
 
+    /// The board describes its secrets.py by name and type; the output must not contain the values.
+    @Test func describesBoardOnlyModuleWithoutValues() async throws {
+        let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)
+        let device = MicroPythonDevice(transport: port)
+        defer { device.close() }
+        let output = try await device.exec(BoardModules.describeScript("secrets"))
+        #expect(output.contains("WIFI_SSID str"))
+        #expect(output.contains("WIFI_PASSWORD str"))
+        #expect(output.split(whereSeparator: \.isNewline).allSatisfy { $0.split(separator: " ").count == 2 })
+    }
+
     /// The LCD1602 backpack on the test board is wired to SDA=21, SCL=22.
     @Test func scansI2C() async throws {
         let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)

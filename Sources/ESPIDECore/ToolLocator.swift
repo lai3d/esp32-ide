@@ -124,7 +124,8 @@ public struct LanguageServerSpec: Sendable, Hashable {
 
     /// Answers a `workspace/configuration` request: tells pyright which interpreter and which
     /// MicroPython stubs (if installed) to use.
-    public static func configuration(items: [JSONValue], pythonPath: String?, stubs: URL? = nil) -> JSONValue {
+    public static func configuration(items: [JSONValue], pythonPath: String?, stubs: URL? = nil,
+                                     extraPaths: [URL] = []) -> JSONValue {
         var settings: [String: JSONValue] = [
             "autoSearchPaths": true,
             "useLibraryCodeForTypes": true,
@@ -132,6 +133,7 @@ public struct LanguageServerSpec: Sendable, Hashable {
             "typeCheckingMode": "standard",
         ]
         settings.merge(MicroPythonStubs.analysisSettings(stubs: stubs)) { $1 }
+        if !extraPaths.isEmpty { settings["extraPaths"] = .array(extraPaths.map { .string($0.path) }) }
         let analysis = JSONValue.object(settings)
         return .array(items.map { item in
             switch item["section"]?.stringValue {

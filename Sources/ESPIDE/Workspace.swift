@@ -93,6 +93,7 @@ final class Workspace {
     init() {
         board.onStatus = { [weak self] in self?.flashStatus($0) }
         board.onShowPanel = { [weak self] in self?.bottomTab = $0 }
+        board.onFilesLoaded = { [weak self] in self?.updateBoardStubs() }
     }
 
     var currentDiagnostics: [Diagnostic] {
@@ -677,9 +678,10 @@ final class Workspace {
         lspName = spec.name
         let pythonPath = interpreter?.path
         let stubs = MicroPythonStubs.isInstalled ? MicroPythonStubs.directory : nil
+        let boardStubPaths = boardStubsURL.map { FileManager.default.fileExists(atPath: $0.path) ? [$0] : [] } ?? []
         let client = LSPClient()
         client.configurationProvider = { items in
-            LanguageServerSpec.configuration(items: items, pythonPath: pythonPath, stubs: stubs)
+            LanguageServerSpec.configuration(items: items, pythonPath: pythonPath, stubs: stubs, extraPaths: boardStubPaths)
         }
         client.onNotification = { method, params in
             Task { @MainActor in self.handleNotification(client, method: method, params: params) }
@@ -1050,6 +1052,43 @@ final class Workspace {
 
     /// Shows the Flash Firmware sheet.
     var showFirmwareSheet = false
+
+    /// Stubs for this project's board-only modules (e.g. secrets.py), in the cache folder.
+    var boardStubsURL: URL? {
+        rootURL.map { root in
+            let hash = String(Self.key(for: root).utf8.reduce(UInt64(5381)) { ($0 << 5) &+ $0 &+ UInt64($1) }, radix: 36)
+            return Self.boardCacheURL.deletingLastPathComponent().appendingPathComponent("board-stubs/\(hash)", isDirectory: true)
+        }
+    }
+
+    /// After the board's files are read: describe modules the project imports that exist only on the
+    /// board, write .pyi stubs for them, and restart pyright if they changed.
+    private func updateBoardStubs() {
+        guard let rootURL, let folder = boardStubsURL, isIDFProject == false else { return }
+        let local = ProjectSync.files(in: rootURL).filter { $0.pathExtension == "py" }
+        let sources = local.compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+        let localModules = Set(local.map { $0.deletingPathExtension().lastPathComponent })
+        let modules = BoardModules.candidates(imported: BoardModules.imports(in: sources), boardFiles: board.files,
+                                              localModules: localModules)
+        guard !modules.isEmpty else { return }
+        Task {
+            let descriptions = await board.describeModules(modules)
+            var changed = false
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            for (module, output) in descriptions {
+                let url = folder.appendingPathComponent("\(module).pyi")
+                let stub = BoardModules.stub(fromDescription: output, module: module)
+                if (try? String(contentsOf: url, encoding: .utf8)) != stub {
+                    try? stub.write(to: url, atomically: true, encoding: .utf8)
+                    changed = true
+                }
+            }
+            if changed {
+                flashStatus("Typed \(descriptions.keys.sorted().joined(separator: ", ")) from the board")
+                await restartLanguageServer()
+            }
+        }
+    }
 
     nonisolated static let boardCacheURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ESPIDE/board", isDirectory: true)

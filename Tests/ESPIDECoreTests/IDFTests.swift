@@ -176,3 +176,23 @@ struct ClangdCompletionTests {
         #expect(labels.contains { $0.contains("esp_restart") }, "\(labels.prefix(10))")
     }
 }
+
+@Suite struct BoardModulesTests {
+    @Test func findsBoardOnlyImports() {
+        let imported = BoardModules.imports(in: ["import network\nfrom secrets import WIFI_SSID\nimport a.b as c\n  from tm1637 import X"])
+        #expect(imported == ["network", "secrets", "a", "tm1637"])
+        let files = DeviceFiles.parseListing("F 62 /secrets.py\nF 4000 /main.py\nF 2000 /tm1637.py\nD 0 /lib\nF 9 /lib/ssd1306.py\n")
+        let candidates = BoardModules.candidates(imported: imported.union(["ssd1306", "main"]), boardFiles: files,
+                                                 localModules: ["tm1637", "main"])
+        #expect(candidates == ["secrets", "ssd1306"])
+    }
+
+    @Test func stubHasTypesNotValues() {
+        let stub = BoardModules.stub(fromDescription: "WIFI_SSID str\r\nWIFI_PASSWORD str\r\nretries int\r\nconnect function\r\nos module\r\n",
+                                     module: "secrets")
+        #expect(stub.contains("WIFI_SSID: str"))
+        #expect(stub.contains("retries: int"))
+        #expect(stub.contains("def connect("))
+        #expect(!stub.contains("os"))
+    }
+}
