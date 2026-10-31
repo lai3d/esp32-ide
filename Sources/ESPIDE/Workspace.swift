@@ -176,6 +176,7 @@ final class Workspace {
         await stopLanguageServer()
         await stopClangd()
         rootURL = url
+        ToolboxRecents.record(url)
         fileTree = FileNode.loadTree(at: url)
         fileWatcher = FileWatcher(url: url, ignoredComponents: FileNode.ignoredNames.union([".git"])) { [weak self] in
             self?.reloadTree()
