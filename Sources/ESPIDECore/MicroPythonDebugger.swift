@@ -7,6 +7,8 @@ import Foundation
 /// IDE → board: command lines on stdin — `c` continue, `s` step, `n` step over, `o` step out,
 /// `e <json string>` evaluate, `b <json [[line, condition]…]>` breakpoints, `p` pause.
 /// While running, stdin is polled every 8 probes, so `p` and `b` take effect at the next statement.
+/// Variables named like secrets (PASSWORD, TOKEN, API_KEY, …) are listed as '***': their values stay
+/// on the board unless asked for explicitly in the console.
 enum DebugRuntime {
     static func script(_ result: PythonInstrumenter.Result, breakpoints: [Int: String?]) -> String {
         let functions = result.functionOf.sorted { $0.key < $1.key }.map { "\($0.key):\(literal($0.value))" }.joined(separator: ",")
@@ -126,6 +128,10 @@ enum DebugRuntime {
                     continue
                 v = d[k]
                 if g and (callable(v) or type(v) is type(sys)):
+                    continue
+                u = k.upper()
+                if 'PASS' in u or 'SECRET' in u or 'TOKEN' in u or 'KEY' in u or 'PSK' in u:
+                    o.append([k, "'***'", type(v).__name__])
                     continue
                 o.append([k, _Dr(v), type(v).__name__])
                 if len(o) >= 200:

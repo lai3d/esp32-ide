@@ -159,6 +159,31 @@ import Testing
         #expect(events.output.contains("done 3"))
     }
 
+    @Test func hidesSecretLookingValues() async throws {
+        let python = PythonProcess()
+        let adapter = MicroPythonDebugAdapter(
+            path: "/p/main.py", source: "WIFI_SSID = 'home'\nWIFI_PASSWORD = 'hunter2'\napi_key = 'k'\nx = 1\n",
+            run: { runtime, program, onOutput in try await python.run(runtime: runtime, program: program, onOutput: onOutput) },
+            write: { python.write($0) }, interrupt: { python.kill() })
+        let events = EventLog()
+        adapter.onEvent = { events.add($0, $1) }
+        let log = Collector()
+        _ = try await adapter.request("initialize", arguments: [:])
+        _ = try await adapter.request("setBreakpoints", arguments: ["source": ["path": "/p/main.py"], "breakpoints": [["line": 4]]])
+        _ = try await adapter.request("configurationDone", arguments: .null)
+        try await events.wait(for: "stopped", count: 1)
+        let globals = try await adapter.request("variables", arguments: ["variablesReference": 2])
+        let values = Dictionary(uniqueKeysWithValues: (globals["variables"]?.arrayValue ?? []).compactMap { item in
+            item["name"]?.stringValue.map { ($0, item["value"]?.stringValue ?? "") }
+        })
+        log.append("\(values)")
+        #expect(values["WIFI_SSID"] == "'home'")
+        #expect(values["WIFI_PASSWORD"] == "'***'")
+        #expect(values["api_key"] == "'***'")
+        _ = try await adapter.request("continue", arguments: [:])
+        try await events.wait(for: "terminated", count: 1)
+    }
+
     @Test func reportsTracebackWithFileName() async throws {
         let python = PythonProcess()
         let adapter = MicroPythonDebugAdapter(

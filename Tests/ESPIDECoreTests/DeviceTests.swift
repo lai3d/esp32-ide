@@ -230,6 +230,64 @@ struct RealBoardTests {
         #expect(output.split(whereSeparator: \.isNewline).allSatisfy { $0.split(separator: " ").count == 2 })
     }
 
+    /// The MicroPython debugger on the board: conditional breakpoint, locals, evaluation, step over, pause.
+    @Test func debugsProgram() async throws {
+        let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)
+        let device = MicroPythonDevice(transport: port)
+        defer { device.close() }
+        let program = """
+        import time
+        def add(a, b):
+            s = a + b
+            return s
+
+        total = 0
+        for i in range(3):
+            total = add(total, i)
+        print("done", total)
+        n = 0
+        while n < 100000:
+            n += 1
+            time.sleep_ms(1)
+        """
+        let adapter = MicroPythonDebugAdapter(
+            path: "/p/main.py", source: program,
+            run: { runtime, program, onOutput in
+                try await device.withRawREPL(softReset: true) { session in
+                    _ = try await session.exec(runtime, timeout: .seconds(10))
+                    _ = try await session.exec(program, timeout: nil, onOutput: onOutput)
+                }
+            },
+            write: { try? device.sendTerminal($0) }, interrupt: { device.interrupt() })
+        let events = EventLog()
+        adapter.onEvent = { events.add($0, $1) }
+        _ = try await adapter.request("initialize", arguments: [:])
+        _ = try await adapter.request("setBreakpoints", arguments: [
+            "source": ["path": "/p/main.py"], "breakpoints": [["line": 3, "condition": "a == 1"]],
+        ])
+        _ = try await adapter.request("configurationDone", arguments: .null)
+        try await events.wait(for: "stopped", count: 1)
+        let locals = try await adapter.request("variables", arguments: ["variablesReference": 1])
+        #expect((locals["variables"]?.arrayValue ?? []).compactMap { $0["value"]?.stringValue } == ["1", "2"], "\(locals)")
+        let value = try await adapter.request("evaluate", arguments: ["expression": "a * 10 + b"])
+        #expect(value["result"]?.stringValue == "12")
+        _ = try await adapter.request("next", arguments: [:])
+        try await events.wait(for: "stopped", count: 2)
+        var frames = try await adapter.request("stackTrace", arguments: [:])
+        #expect(frames["stackFrames"]?[0]?["line"]?.intValue == 4)
+        // Clear breakpoints while paused, run on, then pause the running loop.
+        _ = try await adapter.request("setBreakpoints", arguments: ["source": ["path": "/p/main.py"], "breakpoints": []])
+        _ = try await adapter.request("continue", arguments: [:])
+        try await Task.sleep(for: .seconds(1))
+        _ = try await adapter.request("pause", arguments: [:])
+        try await events.wait(for: "stopped", count: 3)
+        frames = try await adapter.request("stackTrace", arguments: [:])
+        #expect([12, 13].contains(frames["stackFrames"]?[0]?["line"]?.intValue ?? 0), "\(frames)")
+        #expect(events.output.contains("done 3"))
+        adapter.terminate()
+        try await events.wait(for: "terminated", count: 1)
+    }
+
     /// The LCD1602 backpack on the test board is wired to SDA=21, SCL=22.
     @Test func scansI2C() async throws {
         let port = try SerialPort(path: ProcessInfo.processInfo.environment["ESPIDE_TEST_PORT"]!)
