@@ -45,6 +45,9 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
   is not modified and Apple's clangd works with the Xtensa/RISC-V toolchains. *Menuconfig* opens in Terminal.
   `idf.py` comes from a setup script: an `idf-env.sh` in the project or a parent folder, `$IDF_PATH/export.sh`, `~/esp/esp-idf`,
   or one chosen with *ESP-IDF → Choose ESP-IDF…*. Per-project options (`-B build-x -DSDKCONFIG_DEFAULTS="a;b"`) via *Build Options…*.
+- **Markdown**: syntax coloring in the editor, and a rendered **Preview** (Source / Preview in the editor header, ⇧⌘V) with headings,
+  lists, task lists, code blocks, quotes and tables (column alignment, CJK-aware widths); relative links open in the IDE.
+- Open a file from the command line (`ESPIDE path/to/file.md`): its git repository (or folder) opens as the project.
 - From PyIDE: tabs, Python highlighting and editing, pyright completion / hover / go to definition / references / rename, Outline, ruff formatting.
 
 ## Develop
@@ -61,7 +64,7 @@ swift scripts/make-icon.swift                           # regenerate Resources/A
 Layout:
 
 - `Sources/ESPIDECore` — UI-independent: `SerialPort` (termios), `MicroPythonDevice` (raw REPL), `DeviceFiles` (list/read/write/hash/delete),
-  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`, `IDFProject`, `CHighlighter`, `Clangd`,
+  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`, `Markdown`, `IDFProject`, `CHighlighter`, `Clangd`,
   plus PyIDE's LSP client and text utilities.
 - `Sources/ESPIDE` — the app: `Board` (connection, REPL, run, files), `Workspace`, editor and views.
 

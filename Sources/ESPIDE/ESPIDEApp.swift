@@ -58,6 +58,11 @@ struct ESPIDEApp: App {
                     .keyboardShortcut("s", modifiers: [.option, .command])
                     .disabled(!workspace.hasUnsavedChanges)
             }
+            CommandGroup(after: .toolbar) {
+                Toggle("Markdown Preview", isOn: Bindable(workspace).showMarkdownPreview)
+                    .keyboardShortcut("v", modifiers: [.shift, .command])
+                    .disabled(!workspace.isMarkdownFile)
+            }
             CommandMenu("Navigate") {
                 Button("Jump to Definition") {
                     Task { await workspace.jumpToDefinition(at: workspace.caretOffset) }

@@ -28,6 +28,8 @@ struct CodeEditorView: NSViewRepresentable {
     var highlightCode: Bool
     /// C/C++ coloring.
     var highlightC = false
+    /// Markdown coloring.
+    var highlightMarkdown = false
     /// Completion, hover, signature help, go to definition and the symbol context menu.
     var languageFeatures = false
     var isEditable: Bool
@@ -656,8 +658,10 @@ struct CodeEditorView: NSViewRepresentable {
 
             storage.beginEditing()
             storage.setAttributes(EditorTheme.baseAttributes, range: fullRange)
-            if parent.highlightCode || parent.highlightC {
-                for token in parent.highlightC ? CHighlighter.tokenize(text) : PythonHighlighter.tokenize(text) {
+            if parent.highlightCode || parent.highlightC || parent.highlightMarkdown {
+                let tokens = parent.highlightMarkdown ? MarkdownHighlighter.tokenize(text)
+                    : parent.highlightC ? CHighlighter.tokenize(text) : PythonHighlighter.tokenize(text)
+                for token in tokens {
                     storage.addAttribute(.foregroundColor, value: EditorTheme.color(for: token.kind), range: token.range)
                 }
             }

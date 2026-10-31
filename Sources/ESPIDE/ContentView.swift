@@ -178,7 +178,7 @@ struct FileTreeView: View {
         switch node.url.pathExtension {
         case "py", "pyi", "pyw": return "doc.text"
         case "toml", "cfg", "ini", "lock": return "shippingbox"
-        case "md": return "doc.richtext"
+        case "md", "markdown": return "doc.richtext"
         default: return "doc"
         }
     }
@@ -196,13 +196,16 @@ struct EditorArea: View {
                 }
                 EditorHeader()
                 Divider()
-                if workspace.currentFile != nil {
+                if let file = workspace.currentFile, workspace.isMarkdownFile, workspace.showMarkdownPreview {
+                    MarkdownPreview(text: workspace.text, fileURL: file)
+                } else if workspace.currentFile != nil {
                     CodeEditorView(
                         documentID: workspace.currentDocumentID,
                         openDocumentIDs: Set(workspace.documents.map(\.id)),
                         text: workspace.text,
                         highlightCode: workspace.isPythonFile,
                         highlightC: workspace.currentFile.map(CHighlighter.isCSource) ?? false,
+                        highlightMarkdown: workspace.isMarkdownFile,
                         languageFeatures: workspace.hasLanguageFeatures,
                         isEditable: !workspace.isReadOnly,
                         diagnostics: workspace.currentDiagnostics,
@@ -321,6 +324,18 @@ struct EditorHeader: View {
                 .help("Go Back (⌃⌘←)")
             if let file = workspace.currentFile {
                 Text(relativePath(file)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                if workspace.isMarkdownFile {
+                    @Bindable var workspace = workspace
+                    Picker("View", selection: $workspace.showMarkdownPreview) {
+                        Text("Source").tag(false)
+                        Text("Preview").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Show the rendered Markdown (⇧⌘V)")
+                }
                 if workspace.isReadOnly {
                     Text("Read Only")
                         .font(.caption2.weight(.semibold))

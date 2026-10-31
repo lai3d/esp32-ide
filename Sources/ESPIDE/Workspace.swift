@@ -123,6 +123,11 @@ final class Workspace {
     var currentDocumentID: String { currentFile.map(Self.key(for:)) ?? "" }
 
     var isPythonFile: Bool { currentFile.map(Self.isPython) ?? false }
+    var isMarkdownFile: Bool { currentFile.map(Markdown.isMarkdown) ?? false }
+    /// Markdown files open rendered; the toggle in the editor header switches to the source. Persisted.
+    var showMarkdownPreview: Bool = UserDefaults.standard.object(forKey: "showMarkdownPreview") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showMarkdownPreview, forKey: "showMarkdownPreview") }
+    }
 
     /// Files outside the project (stdlib, typeshed stubs) or inside a virtualenv are opened read-only.
     var isReadOnly: Bool { currentFile.map(isReadOnly) ?? false }
@@ -166,10 +171,15 @@ final class Workspace {
         for arg in CommandLine.arguments.dropFirst() {
             var isDir: ObjCBool = false
             let url = URL(fileURLWithPath: arg).standardizedFileURL
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
+            if isDir.boolValue {
                 await openFolder(url)
-                return
+            } else {
+                // A file: open its folder (or the git repository it's in), then the file.
+                await openFolder(Self.projectRoot(containing: url))
+                openFile(url)
             }
+            return
         }
     }
 
@@ -1248,6 +1258,16 @@ final class Workspace {
     }
 
     // MARK: - Helpers
+
+    /// The nearest enclosing folder with a .git, else the file's own folder.
+    nonisolated static func projectRoot(containing file: URL) -> URL {
+        var folder = file.deletingLastPathComponent()
+        while folder.path != "/" {
+            if FileManager.default.fileExists(atPath: folder.appendingPathComponent(".git").path) { return folder }
+            folder = folder.deletingLastPathComponent()
+        }
+        return file.deletingLastPathComponent()
+    }
 
     nonisolated static func key(for url: URL) -> String {
         url.resolvingSymlinksInPath().path
