@@ -13,6 +13,7 @@ public struct FileNode: Identifiable, Hashable, Sendable {
     public static let ignoredNames: Set<String> = [
         ".git", ".build", ".idea", ".vscode", "node_modules", "__pycache__", ".venv", "venv",
         ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", ".nox", ".eggs", "build", "dist",
+        "managed_components",
     ]
 
     public init(url: URL, isDirectory: Bool, children: [FileNode]?) {
@@ -31,7 +32,9 @@ public struct FileNode: Identifiable, Hashable, Sendable {
         else { return [] }
 
         return items
-            .filter { !ignoredNames.contains($0.lastPathComponent) && !$0.lastPathComponent.hasSuffix(".egg-info") }
+            .filter { !ignoredNames.contains($0.lastPathComponent) && !$0.lastPathComponent.hasSuffix(".egg-info")
+                // ESP-IDF build folders (idf.py -B build-xyz)
+                && !$0.lastPathComponent.hasPrefix("build-") }
             .map { url in
                 let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
                 let children = isDir ? (depth < maxDepth ? loadChildren(of: url, depth: depth + 1, maxDepth: maxDepth) : []) : nil

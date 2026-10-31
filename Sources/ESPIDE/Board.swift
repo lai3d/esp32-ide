@@ -32,7 +32,10 @@ final class Board {
     private(set) var isFlashing = false
     private(set) var flashProgress: Double?
     /// Everything the last `runTool` printed.
-    @ObservationIgnored private var toolOutput = ""
+    @ObservationIgnored private(set) var toolOutput = ""
+    /// A command-line tool (idf.py, esptool, uv) is running.
+    private(set) var isToolRunning = false
+    @ObservationIgnored private var toolProcess: Process?
     private(set) var filesLoaded = false
     /// Set when something fails, shown in the status bar.
     var onStatus: ((String) -> Void)?
@@ -337,9 +340,14 @@ final class Board {
     // MARK: - Tools and firmware
 
     /// Runs a command-line tool, streaming its output into the Output panel. Returns the exit status.
-    func runTool(_ executable: URL, _ arguments: [String], title: String) async -> Int32 {
+    func runTool(_ executable: URL, _ arguments: [String], title: String, display: String? = nil) async -> Int32 {
         toolOutput = ""
-        appendOutput("$ \(executable.lastPathComponent) \(arguments.joined(separator: " "))\n")
+        isToolRunning = true
+        defer {
+            isToolRunning = false
+            toolProcess = nil
+        }
+        appendOutput("$ \(display ?? "\(executable.lastPathComponent) \(arguments.joined(separator: " "))")\n")
         return await withCheckedContinuation { continuation in
             let process = Process()
             process.executableURL = executable
@@ -368,12 +376,21 @@ final class Board {
             }
             do {
                 try process.run()
+                toolProcess = process
             } catch {
                 appendOutput("Failed to start \(executable.lastPathComponent): \(error.localizedDescription)\n")
                 continuation.resume(returning: -1)
             }
         }
     }
+
+    /// Interrupts the running tool (SIGINT, like Ctrl-C in a terminal).
+    func stopTool() {
+        toolProcess?.interrupt()
+    }
+
+    /// Clears the Output panel before a new command.
+    func clearOutput() { output = "" }
 
     /// Asks esptool which chip is on the port (resets the board).
     func detectChip(interpreter: URL?) async -> Firmware.Family? {

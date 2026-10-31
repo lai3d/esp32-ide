@@ -26,6 +26,8 @@ struct CodeEditorView: NSViewRepresentable {
     var openDocumentIDs: Set<String>
     var text: String
     var highlightCode: Bool
+    /// C/C++ coloring only (no language server features).
+    var highlightC = false
     var isEditable: Bool
     var diagnostics: [Diagnostic]
     var breakpointLines: Set<Int> = []
@@ -652,8 +654,8 @@ struct CodeEditorView: NSViewRepresentable {
 
             storage.beginEditing()
             storage.setAttributes(EditorTheme.baseAttributes, range: fullRange)
-            if parent.highlightCode {
-                for token in PythonHighlighter.tokenize(text) {
+            if parent.highlightCode || parent.highlightC {
+                for token in parent.highlightC ? CHighlighter.tokenize(text) : PythonHighlighter.tokenize(text) {
                     storage.addAttribute(.foregroundColor, value: EditorTheme.color(for: token.kind), range: token.range)
                 }
             }

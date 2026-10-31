@@ -1,6 +1,6 @@
 # ESP32 IDE
 
-A native macOS IDE for MicroPython on ESP32 boards, written in Swift (SwiftUI + AppKit) with no third-party dependencies.
+A native macOS IDE for MicroPython and ESP-IDF on ESP32 boards, written in Swift (SwiftUI + AppKit) with no third-party dependencies.
 Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LSP client, with the local interpreter replaced by a board on a serial port.
 
 > Early MVP: edit, run, upload and browse files on a real board. Tested with an ESP32-D0WD-V3 (CH340) on MicroPython v1.29.
@@ -32,6 +32,11 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
   then reconnect. Uses an installed `esptool`, else `uvx esptool`, else `python -m esptool`.
 - **Plot** panel (⌃⌘L): a live chart of numbers the board prints — `print(t)`, `print(t, p)` or `print("t=", t, "p=", p)` (named series).
 - **I2C scan** (*Board → Scan I2C Bus…*): scans any SDA/SCL pins and names common parts (0x27 LCD backpack, 0x3C SSD1306, 0x76 BMP280, 0x68 MPU6050, …).
+- **ESP-IDF projects** (folders whose `CMakeLists.txt` includes `project.cmake`): the toolbar switches to
+  Target / **Build** (⌘B) / **Flash** (⌥⌘R, then opens the serial monitor) / Monitor / Stop, plus *ESP-IDF → Size, Full Clean*.
+  GCC errors and warnings go to the Problems panel and are underlined in the editor; C/C++ files get syntax coloring.
+  `idf.py` comes from a setup script: an `idf-env.sh` in the project or a parent folder, `$IDF_PATH/export.sh`, `~/esp/esp-idf`,
+  or one chosen with *ESP-IDF → Choose ESP-IDF…*. Per-project options (`-B build-x -DSDKCONFIG_DEFAULTS="a;b"`) via *Build Options…*.
 - From PyIDE: tabs, Python highlighting and editing, pyright completion / hover / go to definition / references / rename, Outline, ruff formatting.
 
 ## Develop
@@ -39,6 +44,7 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
 ```sh
 swift test                                              # unit tests (fake board)
 ESPIDE_TEST_PORT=/dev/cu.usbserial-110 swift test       # plus a round trip against a real board
+ESPIDE_IDF_SETUP=~/esp/esp-idf/export.sh ESPIDE_IDF_PROJECT=/tmp/hello_world swift test   # real idf.py build
 swift run ESPIDE ~/path/to/micropython/project
 scripts/bundle.sh                                       # build/ESPIDE.app (ad-hoc signed)
 ```
@@ -46,13 +52,14 @@ scripts/bundle.sh                                       # build/ESPIDE.app (ad-h
 Layout:
 
 - `Sources/ESPIDECore` — UI-independent: `SerialPort` (termios), `MicroPythonDevice` (raw REPL), `DeviceFiles` (list/read/write/hash/delete),
-  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`,
+  `ProjectSync`, `Firmware` (esptool commands, micropython.org images), `PlotParser`/`PlotData`, `I2C`, `MicroPythonStubs`, `Mip`, `PinScanner`, `IDFProject`, `CHighlighter`,
   plus PyIDE's LSP client and text utilities.
 - `Sources/ESPIDE` — the app: `Board` (connection, REPL, run, files), `Workspace`, editor and views.
 
-Requires macOS 14+ and a board already flashed with MicroPython.
+Requires macOS 14+. MicroPython features need a board flashed with MicroPython (or use *Flash MicroPython Firmware…*);
+ESP-IDF features need an ESP-IDF install.
 
 ## Roadmap
 
 - Pin rules for S3/C3 (the map assumes a classic ESP32)
-- ESP-IDF projects (`idf.py build/flash/monitor`)
+- clangd for C/C++ completion in ESP-IDF projects; menuconfig

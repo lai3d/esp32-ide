@@ -63,6 +63,11 @@ final class Workspace {
     private(set) var interpreter: URL?
     /// The connected board (serial port, REPL, files).
     let board = Board()
+    /// The folder is an ESP-IDF (C) project: Build / Flash / Monitor instead of Run / Upload.
+    private(set) var isIDFProject = false
+    /// Compiler errors and warnings from the last idf.py build, keyed by normalized path.
+    private(set) var buildDiagnostics: [String: [Diagnostic]] = [:]
+    @ObservationIgnored private var flashConfirmed = false
     var bottomTab: BottomTab = .problems
     /// Run ruff/black on ⌘S. Persisted across launches.
     var formatOnSave: Bool = UserDefaults.standard.object(forKey: "formatOnSave") as? Bool ?? true {
@@ -89,12 +94,14 @@ final class Workspace {
 
     var currentDiagnostics: [Diagnostic] {
         guard let currentFile else { return [] }
-        return diagnostics[Self.key(for: currentFile)] ?? []
+        let key = Self.key(for: currentFile)
+        return (diagnostics[key] ?? []) + (buildDiagnostics[key] ?? [])
     }
 
     var allProblems: [ProblemItem] {
-        diagnostics.keys.sorted().flatMap { path in
-            diagnostics[path, default: []].map { ProblemItem(path: path, diagnostic: $0) }
+        let merged = diagnostics.merging(buildDiagnostics) { $0 + $1 }
+        return merged.keys.sorted().flatMap { path in
+            merged[path, default: []].map { ProblemItem(path: path, diagnostic: $0) }
         }
     }
 
@@ -170,11 +177,14 @@ final class Workspace {
             self?.reloadTree()
         }
         interpreter = PythonEnvironment.interpreter(for: url)
+        isIDFProject = IDFProject.isProject(url)
+        buildDiagnostics = [:]
+        flashConfirmed = false
         currentFile = nil
         documents = []
         diagnostics = [:]
         backStack = []
-        let preferred = ["main.py", "__main__.py", "app.py"].lazy.compactMap { Self.firstFile(named: $0, in: self.fileTree) }.first
+        let preferred = ["main.py", "__main__.py", "app.py", "main/main.c", "main/main.cpp"].lazy.compactMap { Self.firstFile(named: $0, in: self.fileTree) }.first
         if let first = preferred ?? Self.firstPythonFile(in: fileTree) {
             openFile(first)
         }
@@ -956,6 +966,142 @@ final class Workspace {
 
     nonisolated static let boardCacheURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ESPIDE/board", isDirectory: true)
+
+    // MARK: - ESP-IDF
+
+    enum IDFAction {
+        case build, flash, clean, size
+        case setTarget(String)
+
+        var arguments: [String] {
+            switch self {
+            case .build: ["build"]
+            case .flash: ["flash"]
+            case .clean: ["fullclean"]
+            case .size: ["size"]
+            case let .setTarget(target): ["set-target", target]
+            }
+        }
+    }
+
+    private func defaultsKey(_ name: String) -> String { "\(name).\(rootURL.map(Self.key(for:)) ?? "")" }
+
+    /// The script that provides idf.py: chosen per project, else found automatically.
+    var idfSetupScript: URL? {
+        if let path = UserDefaults.standard.string(forKey: defaultsKey("idfSetup")) { return URL(fileURLWithPath: path) }
+        return rootURL.flatMap { IDFProject.findSetupScript(near: $0) }
+    }
+
+    /// Extra idf.py options for this project (e.g. `-B build-x -DSDKCONFIG_DEFAULTS="…"`).
+    var idfOptions: String {
+        get {
+            access(keyPath: \.idfOptionsVersion)
+            return UserDefaults.standard.string(forKey: defaultsKey("idfOptions")) ?? ""
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: defaultsKey("idfOptions"))
+            idfOptionsVersion += 1
+        }
+    }
+    private var idfOptionsVersion = 0
+
+    func runIDF(_ action: IDFAction) {
+        guard let rootURL, !board.isToolRunning else { return }
+        guard let setup = idfSetupScript else {
+            flashStatus("ESP-IDF not found — ESP-IDF → Choose ESP-IDF…")
+            chooseIDF()
+            return
+        }
+        var arguments = IDFProject.shellWords(idfOptions)
+        if case .flash = action {
+            guard let port = board.port else {
+                flashStatus("No board found — plug it in")
+                return
+            }
+            guard confirmFlash() else { return }
+            arguments += ["-p", port]
+            if board.isConnected { board.disconnect() }  // idf.py needs the port
+        }
+        arguments += action.arguments
+        saveAllNow()
+        board.clearOutput()
+        bottomTab = .output
+        let display = "idf.py " + arguments.joined(separator: " ")
+        Task {
+            let status = await board.runTool(
+                URL(fileURLWithPath: "/bin/bash"),
+                IDFProject.command(setupScript: setup, project: rootURL, idfArguments: arguments),
+                title: "idf.py", display: display)
+            switch action {
+            case .build, .flash:
+                buildDiagnostics = IDFProject.diagnostics(inBuildOutput: board.toolOutput, project: rootURL)
+                let errors = buildDiagnostics.values.joined().filter { $0.severity == .error }.count
+                if errors > 0 { bottomTab = .problems }
+            case .clean:
+                buildDiagnostics = [:]
+            default:
+                break
+            }
+            if status == 0 {
+                flashStatus("\(display): done")
+                if case .flash = action {
+                    // Show the app's log, like idf.py monitor.
+                    try? await Task.sleep(for: .milliseconds(300))
+                    board.connect()
+                }
+            } else {
+                flashStatus("\(display) failed (status \(status))")
+            }
+        }
+    }
+
+    /// Flashing an ESP-IDF app replaces MicroPython; ask once per project.
+    private func confirmFlash() -> Bool {
+        guard !flashConfirmed else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Flash this ESP-IDF app to the board?"
+        alert.informativeText = "It replaces the firmware on the board (MicroPython and its files will no longer run). "
+            + "You can put MicroPython back with Board → Flash MicroPython Firmware…"
+        alert.addButton(withTitle: "Flash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        flashConfirmed = true
+        return true
+    }
+
+    /// ESP-IDF → Choose ESP-IDF…: an ESP-IDF folder (its export.sh) or a setup script such as idf-env.sh.
+    func chooseIDF() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.showsHiddenFiles = true
+        panel.prompt = "Use"
+        panel.message = "Choose an ESP-IDF folder, or a script that sets up idf.py when sourced (e.g. idf-env.sh)"
+        panel.directoryURL = idfSetupScript?.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let script = IDFProject.setupScript(fromChoice: url) else {
+            flashStatus("\(url.lastPathComponent) has no export.sh")
+            return
+        }
+        UserDefaults.standard.set(script.path, forKey: defaultsKey("idfSetup"))
+        idfOptionsVersion += 1
+        flashStatus("ESP-IDF: \(script.path)")
+    }
+
+    /// ESP-IDF → Build Options…
+    func editIDFOptions() {
+        let alert = NSAlert()
+        alert.messageText = "idf.py options for \(rootURL?.lastPathComponent ?? "this project")"
+        alert.informativeText = "Added before every command, e.g. -B build-s3 -DIDF_TARGET=esp32s3 -DSDKCONFIG_DEFAULTS=\"a;b\""
+        let field = NSTextField(string: idfOptions)
+        field.frame = NSRect(x: 0, y: 0, width: 420, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        idfOptions = field.stringValue.trimmingCharacters(in: .whitespaces)
+    }
 
     // MARK: - Helpers
 

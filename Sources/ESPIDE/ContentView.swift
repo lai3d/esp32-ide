@@ -20,6 +20,9 @@ struct ContentView: View {
             ToolbarItemGroup(placement: .navigation) {
                 BoardPicker()
             }
+            if workspace.isIDFProject {
+                ToolbarItemGroup(placement: .primaryAction) { IDFToolbar() }
+            } else {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { workspace.syncProject() } label: {
                     Label("Sync", systemImage: "arrow.triangle.2.circlepath")
@@ -47,6 +50,7 @@ struct ContentView: View {
                 .help("Soft reset: restart MicroPython and run main.py (⇧⌘R)")
                 .disabled(!workspace.board.isIdle)
             }
+            }
         }
         .task { await workspace.handleLaunchArguments() }
         .sheet(isPresented: Bindable(workspace).showFirmwareSheet) { FirmwareView().environment(workspace) }
@@ -62,7 +66,7 @@ struct WelcomeView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
             Text("ESP32 IDE").font(.largeTitle.bold())
-            Text("Open a MicroPython project folder, then connect your board.")
+            Text("Open a MicroPython or ESP-IDF project folder, then connect your board.")
                 .foregroundStyle(.secondary)
             Button("Open Folder…") { workspace.presentOpenPanel() }
                 .keyboardShortcut("o")
@@ -198,6 +202,7 @@ struct EditorArea: View {
                         openDocumentIDs: Set(workspace.documents.map(\.id)),
                         text: workspace.text,
                         highlightCode: workspace.isPythonFile,
+                        highlightC: workspace.currentFile.map(CHighlighter.isCSource) ?? false,
                         isEditable: !workspace.isReadOnly,
                         diagnostics: workspace.currentDiagnostics,
                         reveal: workspace.revealTarget,
@@ -343,7 +348,7 @@ struct BottomPanel: View {
                 Picker("Panel", selection: $workspace.bottomTab) {
                     Text("Problems (\(workspace.allProblems.count))").tag(BottomTab.problems)
                     Text("Output").tag(BottomTab.output)
-                    Text("REPL").tag(BottomTab.repl)
+                    Text(workspace.isIDFProject ? "Monitor" : "REPL").tag(BottomTab.repl)
                     Text("Plot").tag(BottomTab.plot)
                     if !workspace.references.isEmpty || workspace.bottomTab == .references {
                         Text("References (\(workspace.references.count))").tag(BottomTab.references)
@@ -353,7 +358,8 @@ struct BottomPanel: View {
                 .labelsHidden()
                 .fixedSize()
                 Spacer()
-                if workspace.board.isRunning || workspace.board.isFlashing || !workspace.board.isIdle && workspace.board.isConnected {
+                if workspace.board.isRunning || workspace.board.isFlashing || workspace.board.isToolRunning
+                    || !workspace.board.isIdle && workspace.board.isConnected {
                     ProgressView().controlSize(.small)
                 }
                 Label(workspace.board.statusLabel, systemImage: workspace.board.isConnected ? "cable.connector" : "cable.connector.slash")
@@ -589,5 +595,37 @@ struct OutputView: View {
                 .padding(.vertical, 5)
             }
         }
+    }
+}
+
+/// Toolbar for ESP-IDF projects.
+struct IDFToolbar: View {
+    @Environment(Workspace.self) private var workspace
+
+    var body: some View {
+        let busy = workspace.board.isToolRunning
+        Menu {
+            ForEach(IDFProject.targets, id: \.self) { target in
+                Button(target) { workspace.runIDF(.setTarget(target)) }
+            }
+        } label: {
+            Label("Target", systemImage: "cpu")
+        }
+        .help("idf.py set-target")
+        .disabled(busy)
+        Button { workspace.runIDF(.build) } label: { Label("Build", systemImage: "hammer") }
+            .help("idf.py build (⌘B)")
+            .disabled(busy)
+        Button { workspace.runIDF(.flash) } label: { Label("Flash", systemImage: "bolt.fill") }
+            .help("idf.py flash, then show the serial monitor (⌥⌘R)")
+            .disabled(busy || workspace.board.port == nil)
+        Button { workspace.board.toggleConnection(); workspace.bottomTab = .repl } label: {
+            Label("Monitor", systemImage: workspace.board.isConnected ? "waveform.circle.fill" : "waveform.circle")
+        }
+        .help(workspace.board.isConnected ? "Close the serial monitor" : "Open the serial monitor")
+        .disabled(busy)
+        Button { workspace.board.stopTool() } label: { Label("Stop", systemImage: "stop.fill") }
+            .help("Stop idf.py (⌘.)")
+            .disabled(!busy)
     }
 }

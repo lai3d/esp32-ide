@@ -118,6 +118,31 @@ struct ESPIDEApp: App {
                 Button("Show Plot") { workspace.bottomTab = .plot }
                     .keyboardShortcut("l", modifiers: [.control, .command])
             }
+            CommandMenu("ESP-IDF") {
+                Button("Build") { workspace.runIDF(.build) }
+                    .keyboardShortcut("b")
+                    .disabled(!workspace.isIDFProject || workspace.board.isToolRunning)
+                Button("Flash and Monitor") { workspace.runIDF(.flash) }
+                    .keyboardShortcut("r", modifiers: [.option, .command])
+                    .disabled(!workspace.isIDFProject || workspace.board.isToolRunning)
+                Button("Size") { workspace.runIDF(.size) }
+                    .disabled(!workspace.isIDFProject || workspace.board.isToolRunning)
+                Button("Full Clean") { workspace.runIDF(.clean) }
+                    .disabled(!workspace.isIDFProject || workspace.board.isToolRunning)
+                Button("Stop") { workspace.board.stopTool() }
+                    .disabled(!workspace.board.isToolRunning)
+                Divider()
+                Menu("Set Target") {
+                    ForEach(IDFProject.targets, id: \.self) { target in
+                        Button(target) { workspace.runIDF(.setTarget(target)) }
+                    }
+                }
+                .disabled(!workspace.isIDFProject || workspace.board.isToolRunning)
+                Button("Build Options…") { workspace.editIDFOptions() }
+                    .disabled(!workspace.isIDFProject)
+                Button("Choose ESP-IDF…") { workspace.chooseIDF() }
+                    .disabled(workspace.rootURL == nil)
+            }
             CommandMenu("Python") {
                 Button("Format Document") { workspace.formatDocument() }
                     .keyboardShortcut("f", modifiers: [.shift, .option])
