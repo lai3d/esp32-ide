@@ -47,8 +47,10 @@ final class Board {
     private(set) var machine: String?
     /// Set when something fails, shown in the status bar.
     var onStatus: ((String) -> Void)?
-    /// Called after the board's file list is (re)read.
-    var onFilesLoaded: (() -> Void)?
+    /// Given the board's files, which board-only modules to describe (see BoardModules).
+    var moduleCandidates: (@MainActor ([DeviceFile]) -> [String])?
+    /// Receives module name → `name type` lines after the files are read.
+    var onModulesDescribed: (([String: String]) -> Void)?
     /// Switches the bottom panel (Output / REPL) when a command starts.
     var onShowPanel: ((BottomTab) -> Void)?
 
@@ -257,11 +259,19 @@ final class Board {
         perform("Reading files") { session in
             let files = try await session.listFiles()
             let machine = try? await session.exec("import sys\nprint(sys.implementation._machine)")
-            await MainActor.run {
+            let modules = await MainActor.run {
                 self.files = files
                 self.filesLoaded = true
                 if let machine { self.machine = machine.trimmingCharacters(in: .whitespacesAndNewlines) }
-                self.onFilesLoaded?()
+                return self.moduleCandidates?(files) ?? []
+            }
+            // Same raw-REPL session: names and types only, values stay on the board.
+            var descriptions: [String: String] = [:]
+            for module in modules {
+                if let output = try? await session.exec(BoardModules.describeScript(module)) { descriptions[module] = output }
+            }
+            if !descriptions.isEmpty {
+                await MainActor.run { self.onModulesDescribed?(descriptions) }
             }
         }
     }
@@ -343,19 +353,6 @@ final class Board {
                 appendOutput("\n[\(error.localizedDescription)]\n")
                 onStatus?(error.localizedDescription)
                 if device != nil { state = .connected }
-            }
-        }
-    }
-
-    /// Asks the board for the public names and types of modules (see BoardModules); values stay on the board.
-    func describeModules(_ modules: [String]) async -> [String: String] {
-        await withCheckedContinuation { continuation in
-            perform("Reading board modules", onFailure: { continuation.resume(returning: [:]) }) { session in
-                var result: [String: String] = [:]
-                for module in modules {
-                    if let output = try? await session.exec(BoardModules.describeScript(module)) { result[module] = output }
-                }
-                continuation.resume(returning: result)
             }
         }
     }

@@ -93,7 +93,8 @@ final class Workspace {
     init() {
         board.onStatus = { [weak self] in self?.flashStatus($0) }
         board.onShowPanel = { [weak self] in self?.bottomTab = $0 }
-        board.onFilesLoaded = { [weak self] in self?.updateBoardStubs() }
+        board.moduleCandidates = { [weak self] files in self?.boardOnlyModules(files) ?? [] }
+        board.onModulesDescribed = { [weak self] in self?.writeBoardStubs($0) }
     }
 
     var currentDiagnostics: [Diagnostic] {
@@ -1061,33 +1062,31 @@ final class Workspace {
         }
     }
 
-    /// After the board's files are read: describe modules the project imports that exist only on the
-    /// board, write .pyi stubs for them, and restart pyright if they changed.
-    private func updateBoardStubs() {
-        guard let rootURL, let folder = boardStubsURL, isIDFProject == false else { return }
+    /// Modules the project imports that exist only on the board.
+    private func boardOnlyModules(_ files: [DeviceFile]) -> [String] {
+        guard let rootURL, !isIDFProject else { return [] }
         let local = ProjectSync.files(in: rootURL).filter { $0.pathExtension == "py" }
         let sources = local.compactMap { try? String(contentsOf: $0, encoding: .utf8) }
-        let localModules = Set(local.map { $0.deletingPathExtension().lastPathComponent })
-        let modules = BoardModules.candidates(imported: BoardModules.imports(in: sources), boardFiles: board.files,
-                                              localModules: localModules)
-        guard !modules.isEmpty else { return }
-        Task {
-            let descriptions = await board.describeModules(modules)
-            var changed = false
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            for (module, output) in descriptions {
-                let url = folder.appendingPathComponent("\(module).pyi")
-                let stub = BoardModules.stub(fromDescription: output, module: module)
-                if (try? String(contentsOf: url, encoding: .utf8)) != stub {
-                    try? stub.write(to: url, atomically: true, encoding: .utf8)
-                    changed = true
-                }
-            }
-            if changed {
-                flashStatus("Typed \(descriptions.keys.sorted().joined(separator: ", ")) from the board")
-                await restartLanguageServer()
+        return BoardModules.candidates(imported: BoardModules.imports(in: sources), boardFiles: files,
+                                       localModules: Set(local.map { $0.deletingPathExtension().lastPathComponent }))
+    }
+
+    /// Writes .pyi stubs for board-only modules and restarts pyright if they changed.
+    private func writeBoardStubs(_ descriptions: [String: String]) {
+        guard let folder = boardStubsURL else { return }
+        var changed = false
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for (module, output) in descriptions {
+            let url = folder.appendingPathComponent("\(module).pyi")
+            let stub = BoardModules.stub(fromDescription: output, module: module)
+            if (try? String(contentsOf: url, encoding: .utf8)) != stub {
+                try? stub.write(to: url, atomically: true, encoding: .utf8)
+                changed = true
             }
         }
+        guard changed else { return }
+        flashStatus("Typed \(descriptions.keys.sorted().joined(separator: ", ")) from the board")
+        Task { await restartLanguageServer() }
     }
 
     nonisolated static let boardCacheURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
