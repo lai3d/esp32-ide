@@ -22,6 +22,9 @@ import Testing
         #expect(Firmware.chipDescription(inOutput: v5) == "ESP32-D0WD-V3 (revision v3.1)")
         #expect(Firmware.chipDescription(inOutput: v5).flatMap(Firmware.Family.init(chipDescription:)) == .esp32)
         #expect(Firmware.chipDescription(inOutput: v4).flatMap(Firmware.Family.init(chipDescription:)) == .esp32s3)
+        #expect(Firmware.Family(chipDescription: "ESP32-P4 (revision v1.0)") == .esp32p4)
+        #expect(Firmware.Family.esp32p4.flashOffset == "0x2000")
+        #expect(Firmware.Family.esp32c6.flashOffset == "0x0")
     }
 
     @Test func writeArgumentsUseChipOffset() {

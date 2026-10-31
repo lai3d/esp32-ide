@@ -23,7 +23,7 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
   index's SHA-256) and copies them to `/lib`, so the board doesn't need Wi-Fi.
 - **GPIO usage** (sidebar, last icon): every pin the project uses — `Pin(…)`, `ADC`/`PWM`, driver keywords like `clk=16`, `*_PIN = 25`
   constants — with classic-ESP32 warnings: flash pins 6–11, input-only 34–39 driven as outputs, strapping pins (12!), ADC2 with Wi-Fi,
-  UART0, one pin used as two different things. Rules for ESP32, ESP32-S3 and ESP32-C3, picked from the connected board
+  UART0, one pin used as two different things. Rules for ESP32, ESP32-S3, ESP32-C3, ESP32-C6 and ESP32-P4, picked from the connected board
   (`sys.implementation._machine`) or chosen in the sidebar. Click a use to jump to it.
 - **Upload** (⌘U) the current file to the same path on the board; **Sync** (⇧⌘S) uploads every changed `.py`/`.json` file of the project.
   Unchanged files are skipped by comparing SHA-256 on the Mac and on the board. `docs/`, `tests/`, hidden folders and `*.example.py` are not uploaded.
@@ -31,7 +31,7 @@ Sibling of [python-ide](https://github.com/lai3d/python-ide): same editor and LS
   `~/Library/Application Support/ESPIDE/stubs` (your project is not modified) and points pyright at them, so `machine`, `network`, `neopixel`, …
   complete and type-check against MicroPython's own standard library. Without stubs, unresolved imports are silenced.
 - **Flash firmware** (*Board → Flash MicroPython Firmware…*): detect the chip with esptool, download the latest stable image from
-  micropython.org (or pick a `.bin`), optionally erase, write at the right offset (0x1000 for ESP32, 0x0 for S2/S3/C3/C6) with a progress bar,
+  micropython.org (or pick a `.bin`), optionally erase, write at the right offset (0x1000 for ESP32, 0x2000 for P4, 0x0 for S2/S3/C3/C6) with a progress bar,
   then reconnect. Uses an installed `esptool`, else `uvx esptool`, else `python -m esptool`.
 - **Board-only modules**: when a module the project imports exists only on the board (a `secrets.py` kept out of git), the board reports its
   public names and types — never values — and ESPIDE writes a `.pyi` stub in its cache so pyright stops flagging `WIFI_SSID` etc.
@@ -73,5 +73,4 @@ ESP-IDF features need an ESP-IDF install.
 
 ## Roadmap
 
-- Pin rules for more chips (C6, P4)
 - Debugging ESP-IDF apps with OpenOCD + GDB

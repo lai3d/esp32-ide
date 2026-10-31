@@ -103,6 +103,8 @@ import Testing
         #expect(PinScanner.Chip(machine: "Generic ESP32 module with ESP32") == .esp32)
         #expect(PinScanner.Chip(machine: "Generic ESP32S3 module with ESP32S3") == .esp32s3)
         #expect(PinScanner.Chip(machine: "ESP32-C3 DevKit") == .esp32c3)
+        #expect(PinScanner.Chip(machine: "Generic ESP32C6 module with ESP32C6") == .esp32c6)
+        #expect(PinScanner.Chip(machine: "Generic ESP32P4 module with ESP32P4") == .esp32p4)
         #expect(PinScanner.Chip(machine: "RP2040") == nil)
     }
 
@@ -121,5 +123,25 @@ import Testing
         #expect(pins[14]?.severity == .error)
         #expect(pins[9]?.severity == .warning)
         #expect(pins[25]?.severity == .error)
+    }
+
+    @Test func c6Rules() {
+        let uses = PinScanner.scan([(url, "a = Pin(25)\nb = Pin(12)\nc = Pin(9, Pin.IN)\nd = ADC(Pin(4))\nimport network\nw = network.WLAN()\ne = Pin(31)")])
+        let pins = Dictionary(uniqueKeysWithValues: PinScanner.pins(uses, usesWiFi: true, chip: .esp32c6).map { ($0.number, $0) })
+        #expect(pins[25]?.severity == .error)    // SPI flash
+        #expect(pins[12]?.severity == .warning)  // USB D−
+        #expect(pins[9]?.severity == .warning)   // BOOT
+        #expect(pins[4]?.severity == .info)      // strapping, but ADC1 so fine with Wi-Fi
+        #expect(pins[31]?.severity == .error)    // doesn't exist
+    }
+
+    @Test func p4Rules() {
+        let uses = PinScanner.scan([(url, "a = Pin(54, Pin.OUT)\nb = Pin(35)\nc = Pin(37)\nd = Pin(8)\ne = Pin(55)")])
+        let pins = Dictionary(uniqueKeysWithValues: PinScanner.pins(uses, usesWiFi: false, chip: .esp32p4).map { ($0.number, $0) })
+        #expect(pins[54]?.severity == nil)
+        #expect(pins[8]?.severity == nil)        // flash has its own pins
+        #expect(pins[35]?.severity == .warning)  // BOOT
+        #expect(pins[37]?.severity == .warning)  // UART0 TX
+        #expect(pins[55]?.severity == .error)
     }
 }

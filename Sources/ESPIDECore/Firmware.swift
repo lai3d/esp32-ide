@@ -9,6 +9,7 @@ public enum Firmware {
         case esp32s2 = "ESP32_GENERIC_S2"
         case esp32c3 = "ESP32_GENERIC_C3"
         case esp32c6 = "ESP32_GENERIC_C6"
+        case esp32p4 = "ESP32_GENERIC_P4"
 
         public var id: String { rawValue }
 
@@ -19,11 +20,18 @@ public enum Firmware {
             case .esp32s2: "ESP32-S2"
             case .esp32c3: "ESP32-C3"
             case .esp32c6: "ESP32-C6"
+            case .esp32p4: "ESP32-P4"
             }
         }
 
-        /// The classic ESP32 keeps its second-stage bootloader at 0x1000; newer chips at 0.
-        public var flashOffset: String { self == .esp32 ? "0x1000" : "0x0" }
+        /// Where the image (bootloader first) goes: 0x1000 on the classic ESP32, 0x2000 on the P4, 0 on the rest.
+        public var flashOffset: String {
+            switch self {
+            case .esp32: "0x1000"
+            case .esp32p4: "0x2000"
+            default: "0x0"
+            }
+        }
 
         public var downloadPage: URL { URL(string: "https://micropython.org/download/\(rawValue)/")! }
 
@@ -34,6 +42,7 @@ public enum Firmware {
             else if upper.contains("ESP32-S2") { self = .esp32s2 }
             else if upper.contains("ESP32-C3") { self = .esp32c3 }
             else if upper.contains("ESP32-C6") { self = .esp32c6 }
+            else if upper.contains("ESP32-P4") { self = .esp32p4 }
             else if upper.contains("ESP32") { self = .esp32 }
             else { return nil }
         }

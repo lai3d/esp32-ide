@@ -55,7 +55,7 @@ public enum PinScanner {
                 let display = raw.trimmingCharacters(in: .whitespaces)
                 var seen = Set<Int>()
                 func add(_ pin: Int, _ kind: Kind) {
-                    guard pin <= 48, seen.insert(pin).inserted else { return }
+                    guard pin <= 56, seen.insert(pin).inserted else { return }
                     uses.append(Use(pin: pin, kind: kind, file: url, line: index, text: display))
                 }
                 for match in pinCall.matches(in: code, range: range) {
@@ -117,8 +117,20 @@ public enum PinScanner {
             flash: Set(12...17), inputOnly: [], strapping: [2, 8],
             criticalStrapping: [9: "BOOT button: low at reset enters the bootloader"],
             adc2: [5], uart0: [21: "TX", 20: "RX"], usb: [18, 19])
+        /// Only ADC1 (GPIO0–6), so no ADC2/Wi-Fi conflict.
+        public static let esp32c6 = Chip(
+            name: "ESP32-C6", valid: Set(0...30),
+            flash: Set(24...30), inputOnly: [], strapping: [4, 5, 8, 15],
+            criticalStrapping: [9: "BOOT button: low at reset enters the bootloader"],
+            adc2: [], uart0: [16: "TX", 17: "RX"], usb: [12, 13])
+        /// Flash and PSRAM have dedicated pins; Wi-Fi comes from a companion chip, so ADC2 stays usable.
+        public static let esp32p4 = Chip(
+            name: "ESP32-P4", valid: Set(0...54),
+            flash: [], inputOnly: [], strapping: [34, 36, 37, 38],
+            criticalStrapping: [35: "BOOT button: low at reset enters the bootloader"],
+            adc2: [], uart0: [37: "TX", 38: "RX"], usb: [24, 25])
 
-        public static let all = [esp32, esp32s3, esp32c3]
+        public static let all = [esp32, esp32s3, esp32c3, esp32c6, esp32p4]
 
         /// From MicroPython's `sys.implementation._machine` / `os.uname().machine`,
         /// e.g. "Generic ESP32S3 module with ESP32S3".
@@ -126,6 +138,8 @@ public enum PinScanner {
             let upper = machine.uppercased().replacingOccurrences(of: "-", with: "")
             if upper.contains("ESP32S3") { self = .esp32s3 }
             else if upper.contains("ESP32C3") { self = .esp32c3 }
+            else if upper.contains("ESP32C6") { self = .esp32c6 }
+            else if upper.contains("ESP32P4") { self = .esp32p4 }
             else if upper.contains("ESP32") { self = .esp32 }
             else { return nil }
         }
